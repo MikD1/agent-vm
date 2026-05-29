@@ -26,6 +26,10 @@ Create `~/.config/ai-dev/secrets.env` with your API keys:
 ANTHROPIC_API_KEY=your-key-here
 ```
 
+```bash
+chmod 600 ~/.config/ai-dev/secrets.env
+```
+
 ## Usage
 
 ### 1. Add config to your project

@@ -5,3 +5,4 @@ local/
 *.key
 *.crt
 .DS_Store
+docs/superpowers/

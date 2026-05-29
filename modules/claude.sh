@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Requires node module to have run first
+command -v npm >/dev/null 2>&1 || { echo "Error: claude module requires the node module"; exit 1; }
+
 # Install Claude Code CLI
-npm install -g @anthropic-ai/claude-code || true
+npm install -g @anthropic-ai/claude-code
 
 # Create with-ai-env wrapper
 sudo -u "${VM_USER}" bash -c '

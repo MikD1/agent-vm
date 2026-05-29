@@ -78,8 +78,8 @@ trap 'rm -f "$TEMP_YAML"' EXIT
 
 cp "$REPO_DIR/base.yaml" "$TEMP_YAML"
 
-# Lima's default Linux username is the host $USER with .linux appended (e.g. alice -> alice.linux)
-MOUNT_POINT="/home/${USER}.linux/${PROJECT_NAME}"
+# Lima 2.x guest home is /home/${USER}.guest (also accessible via .linux alias)
+MOUNT_POINT="/home/${USER}.guest/${PROJECT_NAME}"
 
 yq -i ".mounts += [{
   \"location\": \"$HOST_PROJECT_PATH\",
