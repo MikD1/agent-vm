@@ -4,6 +4,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# --- Preflight ---
+
+command -v limactl >/dev/null 2>&1 || { echo "Error: limactl not found. Install with: brew install lima"; exit 1; }
+command -v yq >/dev/null 2>&1 || { echo "Error: yq not found. Install with: brew install yq"; exit 1; }
+
+# --- Arguments ---
+
 if [ "$#" -lt 1 ]; then
   echo "Usage: $0 <project-name> [host-project-path]"
   echo
@@ -18,6 +25,12 @@ fi
 PROJECT_NAME="$1"
 HOST_PROJECT_PATH="${2:-$HOME/Projects/$PROJECT_NAME}"
 VM_NAME="dev-${PROJECT_NAME}"
+
+# Validate project name is safe for use in VM names and paths
+[[ "$PROJECT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || {
+  echo "Error: project name must contain only letters, digits, hyphens, or underscores"
+  exit 1
+}
 
 # --- Validate ---
 
@@ -48,9 +61,14 @@ fi
 
 # --- Propagate proxy from host secrets if available ---
 
-if [ -f "$HOME/.config/ai-dev/secrets.env" ]; then
-  eval "$(grep -Ei '^(HTTPS?_PROXY|NO_PROXY)=' "$HOME/.config/ai-dev/secrets.env")" || true
-  export HTTP_PROXY HTTPS_PROXY NO_PROXY 2>/dev/null || true
+SECRETS_FILE="$HOME/.config/ai-dev/secrets.env"
+if [ -f "$SECRETS_FILE" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      HTTP_PROXY=*|HTTPS_PROXY=*|NO_PROXY=*)
+        declare -x "${line%%=*}=${line#*=}" ;;
+    esac
+  done < "$SECRETS_FILE"
 fi
 
 # --- Create VM with project mount ---
@@ -60,10 +78,12 @@ trap 'rm -f "$TEMP_YAML"' EXIT
 
 cp "$REPO_DIR/base.yaml" "$TEMP_YAML"
 
-# Add writable project mount
+# Lima's default Linux username is the host $USER with .linux appended (e.g. alice -> alice.linux)
+MOUNT_POINT="/home/${USER}.linux/${PROJECT_NAME}"
+
 yq -i ".mounts += [{
   \"location\": \"$HOST_PROJECT_PATH\",
-  \"mountPoint\": \"/home/\(.ssh.localUser // \"user\").linux/$PROJECT_NAME\",
+  \"mountPoint\": \"$MOUNT_POINT\",
   \"writable\": true
 }]" "$TEMP_YAML"
 
@@ -76,37 +96,33 @@ limactl start "$VM_NAME"
 # --- Detect VM user ---
 
 VM_USER="$(limactl shell "$VM_NAME" whoami)"
+[[ -n "$VM_USER" ]] || { echo "Error: could not detect VM user"; exit 1; }
 
-# --- Run modules via stdin (no need to copy files into VM) ---
+# --- Run modules via stdin ---
 
 # Always run base
 echo "Running module: base"
-limactl shell --root "$VM_NAME" bash -c "
-  export VM_USER='$VM_USER'
-  export VM_PROJECT='$PROJECT_NAME'
-  export VM_SECRETS='/mnt/host/ai-dev'
+limactl shell --root "$VM_NAME" bash -c '
+  export VM_USER="$1" VM_PROJECT="$2" VM_SECRETS="$3"
   export DEBIAN_FRONTEND=noninteractive
-  bash -euo pipefail
-" < "$REPO_DIR/modules/base.sh"
+  bash -euo pipefail -s
+' -- "$VM_USER" "$PROJECT_NAME" '/mnt/host/ai-dev' < "$REPO_DIR/modules/base.sh"
 
 # Run modules from config in order
-MODULES="$(yq -r '.modules[]' "$CONFIG_FILE" 2>/dev/null || true)"
-
-for mod in $MODULES; do
+while IFS= read -r mod; do
+  [[ -z "$mod" || "$mod" == "null" ]] && continue
   MODULE_FILE="$REPO_DIR/modules/${mod}.sh"
   if [ ! -f "$MODULE_FILE" ]; then
     echo "Warning: module '$mod' not found at $MODULE_FILE, skipping"
     continue
   fi
   echo "Running module: $mod"
-  limactl shell --root "$VM_NAME" bash -c "
-    export VM_USER='$VM_USER'
-    export VM_PROJECT='$PROJECT_NAME'
-    export VM_SECRETS='/mnt/host/ai-dev'
+  limactl shell --root "$VM_NAME" bash -c '
+    export VM_USER="$1" VM_PROJECT="$2" VM_SECRETS="$3"
     export DEBIAN_FRONTEND=noninteractive
-    bash -euo pipefail
-  " < "$MODULE_FILE"
-done
+    bash -euo pipefail -s
+  ' -- "$VM_USER" "$PROJECT_NAME" '/mnt/host/ai-dev' < "$MODULE_FILE"
+done <<< "$(yq -r '.modules[]' "$CONFIG_FILE" 2>/dev/null || true)"
 
 echo
 echo "VM ready: $VM_NAME"
