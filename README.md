@@ -41,17 +41,23 @@ modules:
 ./scripts/create-vm.sh my-project ~/Work/my-project
 ```
 
-### 3. Connect
+### 3. List VMs
 
 ```bash
-limactl shell dev-my-project
-# or
-ssh lima-dev-my-project
+limactl list
 ```
 
-VS Code: Remote-SSH → `lima-dev-my-project`
+### 4. Connect
 
-### 4. Work
+```bash
+limactl shell my-project
+# or
+ssh lima-my-project
+```
+
+VS Code: Remote-SSH → `lima-my-project`
+
+### 5. Work
 
 ```bash
 cd ~/my-project
@@ -61,7 +67,7 @@ claude
 Git inside VM: commit, diff, log, branch, rebase — all local operations.
 Git on host: push, pull, fetch — where credentials are configured.
 
-### 5. Delete when done
+### 6. Delete when done
 
 ```bash
 ./scripts/delete-vm.sh my-project

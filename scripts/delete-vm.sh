@@ -8,7 +8,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 PROJECT_NAME="$1"
-VM_NAME="dev-${PROJECT_NAME}"
+VM_NAME="$PROJECT_NAME"
 
 if ! limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$VM_NAME"; then
   echo "VM '$VM_NAME' does not exist."

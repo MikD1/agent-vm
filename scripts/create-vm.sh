@@ -24,7 +24,7 @@ fi
 
 PROJECT_NAME="$1"
 HOST_PROJECT_PATH="${2:-$HOME/Projects/$PROJECT_NAME}"
-VM_NAME="dev-${PROJECT_NAME}"
+VM_NAME="$PROJECT_NAME"
 
 # Validate project name is safe for use in VM names and paths
 [[ "$PROJECT_NAME" =~ ^[a-zA-Z0-9_-]+$ ]] || {
@@ -90,7 +90,7 @@ VM_USER="$(limactl shell "$VM_NAME" whoami)"
 
 # Always run base
 echo "Running module: base"
-limactl shell --root "$VM_NAME" bash -c '
+limactl shell "$VM_NAME" sudo bash -c '
   export VM_USER="$1" VM_PROJECT="$2" VM_SECRETS="$3"
   export DEBIAN_FRONTEND=noninteractive
   bash -euo pipefail -s
@@ -105,7 +105,7 @@ while IFS= read -r mod; do
     continue
   fi
   echo "Running module: $mod"
-  limactl shell --root "$VM_NAME" bash -c '
+  limactl shell "$VM_NAME" sudo bash -c '
     export VM_USER="$1" VM_PROJECT="$2" VM_SECRETS="$3"
     export DEBIAN_FRONTEND=noninteractive
     bash -euo pipefail -s
