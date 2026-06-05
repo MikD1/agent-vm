@@ -7,7 +7,7 @@ vmType: "vz"
 arch: "default"
 
 cpus: 6
-memory: "12GiB"
+memory: "8GiB"
 disk: "120GiB"
 
 mountType: "virtiofs"
