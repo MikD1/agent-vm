@@ -2,7 +2,7 @@
 
 Modular Linux VM environment for AI-assisted development on macOS via [Lima](https://lima-vm.io/).
 
-Each project gets an isolated VM with only the tools it needs. Modules are selected per-project via a `.ai-dev-vm.yaml` config file.
+Each project gets an isolated VM with only the tools it needs. Modules are selected per-project via a `.ai-dev-vm.yaml` config file, and the whole lifecycle is driven by the `vm` command.
 
 ## Prerequisites
 
@@ -10,15 +10,51 @@ Each project gets an isolated VM with only the tools it needs. Modules are selec
 brew install lima yq
 ```
 
-## Setup
+## Install
 
-Create a local config directory (not committed to git):
+From the cloned repo:
 
 ```bash
-mkdir -p ~/.config/ai-dev-vm
-chmod 700 ~/.config/ai-dev-vm
-cp ~/.gitconfig ~/.config/ai-dev-vm/.gitconfig
+./install.sh
 ```
+
+This checks for `brew`/`lima`/`yq` (and tells you what to install if anything is missing), creates `~/.config/ai-dev-vm` (mode 700), copies your `~/.gitconfig` into it, and symlinks `vm` into `~/.local/bin`. If `~/.local/bin` isn't on your `PATH`, the installer prints the line to add.
+
+The CLI runs directly from the clone — keep the repo in place and `git pull` to update.
+
+## Quick Start
+
+```bash
+cd ~/Projects/my-project
+vm init            # 1. write .ai-dev-vm.yaml
+$EDITOR .ai-dev-vm.yaml   # 2. uncomment the modules you need
+vm create          # 3. build + start the VM
+vm shell           # 4. connect
+vm stop            # 5. ...
+```
+
+Run inside a project directory (one containing `.ai-dev-vm.yaml`) and `vm` uses that project automatically — the VM name is the directory's basename. You can also target any VM by name from anywhere, e.g. `vm shell my-project`.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `vm init [path]` | Write a commented `.ai-dev-vm.yaml` template (default: current dir). `--force` overwrites. |
+| `vm create [path]` | Create + start a VM from a project dir (default: current dir). |
+| `vm list` | List all Lima VMs. |
+| `vm shell [name]` | Open a shell in the VM. |
+| `vm start [name]` | Start a stopped VM. |
+| `vm stop [name]` | Stop a running VM. |
+| `vm restart [name]` | Restart a VM. |
+| `vm delete [name]` | Stop and delete a VM. `--force` skips the confirmation. |
+
+`[name]` defaults to the current project; `[path]` defaults to the current directory.
+
+To connect from VS Code: Remote-SSH → `lima-<name>`.
+
+Git inside the VM: commit, diff, log, branch, rebase — all local. Git on the host: push, pull, fetch — where credentials live.
+
+To change a VM's resources or modules, re-create it: `vm delete <name>` then `vm create`.
 
 ## How It Works
 
@@ -27,7 +63,7 @@ graph TB
     subgraph Host["macOS Host"]
         config["~/.config/ai-dev-vm/<br/>(secrets &amp; module configs)"]
         project["~/Projects/my-project/<br/>.ai-dev-vm.yaml"]
-        create["scripts/create-vm.sh"]
+        cli["vm create"]
     end
 
     subgraph VM["Lima VM: my-project"]
@@ -43,13 +79,13 @@ graph TB
     end
 
     config -- "virtiofs mount" --> secrets
-    project -- "virtiofs mount<br/>(added by create-vm.sh)" --> workdir
-    create -- "reads .ai-dev-vm.yaml" --> project
-    create -- "creates VM from base.yaml<br/>runs modules in order" --> VM
+    project -- "virtiofs mount<br/>(added by vm create)" --> workdir
+    cli -- "reads .ai-dev-vm.yaml" --> project
+    cli -- "creates VM from base.yaml<br/>runs modules in order" --> VM
     secrets -- "$VM_SECRETS" --> Modules
 ```
 
-`create-vm.sh` does the following:
+`vm create` does the following:
 
 1. Reads `.ai-dev-vm.yaml` from the project root to get the list of modules
 2. Creates a Lima VM from `base.yaml` and adds a writable mount for the project directory
@@ -65,24 +101,14 @@ Each module runs as root with these environment variables:
 
 Module-specific configs go in `~/.config/ai-dev-vm/modules/<name>/` on the host and are accessible inside modules at `$VM_SECRETS/modules/<name>/`.
 
-## Usage
+## Project Config
 
-### 1. Add config to your project
-
-Create `.ai-dev-vm.yaml` in the project root:
+`.ai-dev-vm.yaml` selects modules and, optionally, VM resources:
 
 ```yaml
 modules:
   - node
   - docker
-  - claude
-```
-
-Optionally customize VM resources (any field omitted falls back to the defaults):
-
-```yaml
-modules:
-  - node
   - claude
 resources:
   cpus: 8        # default: 4
@@ -90,54 +116,7 @@ resources:
   disk: 200GiB   # default: 120GiB
 ```
 
-### 2. Create a VM
-
-```bash
-./scripts/create-vm.sh my-project
-# or with explicit path:
-./scripts/create-vm.sh my-project ~/Work/my-project
-```
-
-### 3. List VMs
-
-```bash
-limactl list
-```
-
-### 4. Connect
-
-```bash
-limactl shell my-project
-# or
-ssh lima-my-project
-```
-
-VS Code: Remote-SSH → `lima-my-project`
-
-### 5. Work
-
-```bash
-cd ~/my-project
-claude
-```
-
-Git inside VM: commit, diff, log, branch, rebase — all local operations.
-Git on host: push, pull, fetch — where credentials are configured.
-
-### 6. Delete when done
-
-```bash
-./scripts/delete-vm.sh my-project
-```
-
-### Update
-
-Re-create instead of updating:
-
-```bash
-./scripts/delete-vm.sh my-project
-./scripts/create-vm.sh my-project
-```
+Each `resources` field is optional; omitted fields keep the default. Values pass straight to Lima, so use Lima's formats (a plain integer for `cpus`, a size string like `16GiB` for `memory`/`disk`).
 
 ## Modules
 
@@ -148,20 +127,7 @@ Re-create instead of updating:
 | `docker` | Docker CE |
 | `claude` | Claude Code CLI |
 
-`base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed automatically.
-
-## Resource Customization
-
-By default each VM gets 4 CPUs, 4GiB memory, and a 120GiB disk. Override any of these per-project with a `resources:` block in `.ai-dev-vm.yaml`:
-
-```yaml
-resources:
-  cpus: 8
-  memory: 16GiB
-  disk: 200GiB
-```
-
-Each field is optional; omitted fields keep the default. Values are passed straight to Lima, so use Lima's formats (a plain integer for `cpus`, a size string like `16GiB` for `memory`/`disk`). To change resources on an existing VM, re-create it (`delete-vm.sh` then `create-vm.sh`).
+The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed automatically.
 
 ## Custom CA Certificates
 
