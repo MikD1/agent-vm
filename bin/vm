@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve this script's real path (following the ~/.local/bin symlink) to find REPO_DIR.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_DIR="$(cd "$BIN_DIR/.." && pwd)"
+export REPO_DIR
+
+# shellcheck source=../lib/common.sh disable=SC1091
+source "$REPO_DIR/lib/common.sh"
+
+cmd="${1:-help}"
+[ "$#" -gt 0 ] && shift
+
+case "$cmd" in
+  create|list|shell|start|stop|restart|delete|init)
+    # shellcheck source=/dev/null
+    source "$REPO_DIR/cmd/$cmd.sh"
+    "cmd_$cmd" "$@"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    printf 'Error: unknown command: %s\n\n' "$cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
