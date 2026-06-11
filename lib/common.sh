@@ -65,6 +65,23 @@ vm_exists() {
   grep -qxF -- "$1" <<<"$names"
 }
 
+# Echo the guest path where the project is mounted: the writable mount whose
+# mountPoint ends in the VM name (create.sh mounts the project at
+# "<guest_home>/<project_name>"). The read-only "/mnt/host/<name>" secrets mount
+# and Lima's own writable mounts (e.g. /tmp/lima) are excluded. Echoes nothing
+# if it can't be determined, so callers can fall back to Lima's default workdir.
+vm_project_dir() {
+  local name="$1" dir lima_yaml
+  dir="$(limactl list --format '{{.Dir}}' "$name" 2>/dev/null)" || return 0
+  lima_yaml="$dir/lima.yaml"
+  [[ -f "$lima_yaml" ]] || return 0
+  NAME="$name" yq -r '
+    [ .mounts[]
+      | select(.writable == true and (.mountPoint | test("/" + strenv(NAME) + "$")))
+      | .mountPoint ] | .[0] // ""
+  ' "$lima_yaml" 2>/dev/null
+}
+
 # Run a module script inside the VM as root via stdin.
 run_module() {
   local vm_name="$1" vm_user="$2" project_name="$3" mod="$4"
