@@ -18,6 +18,14 @@ From the cloned repo:
 ./install.sh
 ```
 
+To remove the `vm` symlink that install.sh added:
+
+```bash
+./uninstall.sh
+```
+
+It never touches third-party tools (lima, yq, brew), your Lima VMs, or `~/.config/ai-dev-vm` (which may hold a customized `.gitconfig`) — it points those out so you can clean them up yourself.
+
 ## Quick Start
 
 ```bash
