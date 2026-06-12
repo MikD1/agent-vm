@@ -34,7 +34,7 @@ preflight() {
 
 # Normalize a raw name (e.g. a directory basename) into a Lima-valid lowercase
 # DNS label: lowercase, every char outside [a-z0-9-] becomes '-', then strip
-# leading/trailing '-'. Dies if nothing valid remains.
+# leading/trailing '-'. Fails (returns 1) if nothing valid remains.
 normalize_name() {
   local n
   n="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-')"
