@@ -10,7 +10,7 @@ cmd_create() {
   host_project_path="$(cd "$host_project_path" && pwd)"
 
   local project_name vm_name
-  project_name="$(basename "$host_project_path")"
+  project_name="$(normalize_name "$(basename "$host_project_path")")"
   validate_name "$project_name"
   vm_name="$project_name"
 
