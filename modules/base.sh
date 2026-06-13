@@ -41,7 +41,7 @@ if [ -d "$CA_DIR" ]; then
     update-ca-certificates
     mv "$CA_BUNDLE.tmp" "$CA_BUNDLE"
     # Node.js/npm uses its own CA bundle; point it to the system bundle
-    echo "export NODE_EXTRA_CA_CERTS=$CA_BUNDLE" > /etc/profile.d/custom-ca.sh
+    echo "export NODE_EXTRA_CA_CERTS=\"$CA_BUNDLE\"" > /etc/profile.d/custom-ca.sh
     export NODE_EXTRA_CA_CERTS="$CA_BUNDLE"
   else
     rm -f "$CA_BUNDLE.tmp"
