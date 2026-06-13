@@ -48,9 +48,23 @@ if [ -d "$CA_DIR" ]; then
   fi
 fi
 
-# Copy gitconfig from host, stripping credential helpers
+# Copy gitconfig from host, stripping all credential sections (helpers + stored
+# creds). Done with `git config` so it understands INI sections/subsections,
+# unlike a line-based grep.
 if [ -f "${VM_SECRETS}/.gitconfig" ]; then
   sudo -u "${VM_USER}" env VM_SECRETS="${VM_SECRETS}" bash -c '
-    grep -v -i "credential\." "${VM_SECRETS}/.gitconfig" > "$HOME/.gitconfig" || true
+    set -euo pipefail
+    dest="$HOME/.gitconfig"
+    cp "${VM_SECRETS}/.gitconfig" "$dest"
+    # Top-level [credential] section.
+    git config --file "$dest" --remove-section credential 2>/dev/null || true
+    # Any [credential "<url>"] subsections: derive each subsection name from its
+    # keys (credential.<url>.<key>) and remove the section.
+    while IFS= read -r key; do
+      sub="${key#credential.}"   # <url>.<key>
+      sub="${sub%.*}"            # <url>
+      [ -n "$sub" ] || continue
+      git config --file "$dest" --remove-section "credential.$sub" 2>/dev/null || true
+    done < <(git config --file "$dest" --name-only --get-regexp "^credential\." 2>/dev/null || true)
   '
 fi
