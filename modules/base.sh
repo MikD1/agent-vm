@@ -7,23 +7,14 @@ apt-get update
 apt-get install -y \
   ca-certificates \
   curl \
-  wget \
   git \
-  git-lfs \
   jq \
   ripgrep \
   fd-find \
-  build-essential \
-  pkg-config \
-  gnupg \
-  lsb-release \
-  apt-transport-https \
-  software-properties-common
+  build-essential
 
 # Ubuntu names fd as fdfind — create symlink
 ln -sf "$(command -v fdfind)" /usr/local/bin/fd || true
-
-git lfs install --system || true
 
 # Install custom CA certificates if provided
 CA_DIR="${VM_SECRETS}/ca-certificates"
