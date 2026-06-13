@@ -17,12 +17,20 @@ if [ -f "$CLAUDE_CONFIG" ]; then
   "
 fi
 
-# Install plugins if list provided
+# Install plugins if list provided. One token per line; "name" uses the default
+# marketplace (claude-plugins-official), "name@marketplace" targets a specific
+# one. `claude plugin install` defaults to --scope user. Run as the VM user with
+# their HOME (-H) so plugins land in that user's ~/.claude. NOTE: this module
+# runs standalone in the VM and cannot use lib/common.sh helpers, so failures
+# are reported with a plain echo to stderr (not `warn`), and we do NOT swallow
+# the exit code unconditionally.
 PLUGINS_FILE="${VM_SECRETS}/modules/claude/plugins"
 if [ -f "$PLUGINS_FILE" ]; then
   while IFS= read -r plugin || [ -n "$plugin" ]; do
     [[ -z "$plugin" || "$plugin" =~ ^# ]] && continue
     echo "Installing Claude plugin: $plugin"
-    sudo -u "${VM_USER}" claude plugins install "$plugin" || true
+    if ! sudo -u "${VM_USER}" -H claude plugin install "$plugin"; then
+      echo "Warning: Claude plugin failed to install: $plugin" >&2
+    fi
   done < "$PLUGINS_FILE"
 fi
