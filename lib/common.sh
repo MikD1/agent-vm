@@ -127,8 +127,12 @@ run_module() {
   local module_file="$REPO_DIR/modules/${mod}.sh"
   [[ -f "$module_file" ]] || die "module '$mod' not found at $module_file"
   info "Running module: $mod"
+  # --workdir / pins the guest cwd to a path that exists; without it `limactl
+  # shell` tries to cd into the host's $PWD inside the guest and emits
+  # "cd: <host path>: No such file or directory" noise (see cmd_shell). Modules
+  # use absolute paths, so the cwd itself doesn't matter.
   # shellcheck disable=SC2016
-  limactl shell "$vm_name" sudo bash -c '
+  limactl shell --workdir / "$vm_name" sudo bash -c '
     export VM_USER="$1" VM_PROJECT="$2" VM_SECRETS="$3"
     export DEBIAN_FRONTEND=noninteractive
     bash -euo pipefail -s
