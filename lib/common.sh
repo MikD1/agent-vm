@@ -68,7 +68,7 @@ validate_cpus() {
 # Assert a value is a Lima size string (memory/disk), e.g. 4GiB, 512MiB, 8G.
 # $1 = field name (for the message), $2 = value.
 validate_size() {
-  if ! [[ "$2" =~ ^[0-9]+(\.[0-9]+)?([KMGT]i?B?)?$ ]]; then
+  if ! [[ "$2" =~ ^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$ ]]; then
     printf 'Error: invalid %s %q in .ai-dev-vm.yaml (expected a size like 16GiB)\n' "$1" "$2" >&2
     return 1
   fi
