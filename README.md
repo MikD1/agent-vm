@@ -36,7 +36,7 @@ vm create
 vm shell
 ```
 
-Run inside a project directory (one containing `.ai-dev-vm.yaml`) and `vm` uses that project automatically — the VM name is the directory's basename. You can also target any VM by name from anywhere, e.g. `vm shell my-project`. The name is normalized to a lowercase DNS label (Lima's requirement): uppercase becomes lowercase and other characters become hyphens, so a directory named `My_Project` yields the VM name `my-project`.
+Run inside a project directory (one containing `.ai-dev-vm.yaml`) and `vm` uses that project automatically — the VM name is the directory's basename. You can also target any VM by name from anywhere, e.g. `vm shell my-project`. The name is normalized to a lowercase DNS label (Lima's requirement): uppercase becomes lowercase and other characters become hyphens, so a directory named `My_Project` yields the VM name `my-project`. Because the name is just the basename, two directories with the same basename (e.g. `~/work/api` and `~/personal/api`) map to the same VM; `vm create` refuses the second with an "already exists" error.
 
 ## Commands
 
@@ -125,7 +125,7 @@ Each `resources` field is optional; omitted fields keep the default. Values pass
 
 | Module | Description |
 |--------|-------------|
-| `node` | Node.js (latest LTS) + npm + pnpm + yarn |
+| `node` | Node.js (LTS, pinned to Node 24.x via NodeSource) + npm + pnpm + yarn |
 | `dotnet` | .NET SDK (latest LTS) |
 | `docker` | Docker CE |
 | `claude` | Claude Code CLI |
