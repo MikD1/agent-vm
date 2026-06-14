@@ -1,10 +1,8 @@
-# ai-dev-vm project config. Uncomment the modules you need.
 modules:
-  - node # Node.js LTS + npm/pnpm/yarn
-  # - dotnet    # .NET SDK (LTS)
-  # - docker    # Docker CE
-  - claude # Claude Code CLI (needs node)
+  - node
+  - go
+  - claude
 
 resources:
-  cpus: 2
-  memory: 2GiB
+  cpus: 4
+  memory: 4GiB
