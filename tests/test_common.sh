@@ -43,5 +43,13 @@ check_eq "resolve_name_from_cwd normalizes" "my-project" "$(cd "$tmp" && resolve
 # --- resolve_target_name normalizes an explicit name ---
 check_eq "resolve_target_name explicit normalizes" "my-project" "$(resolve_target_name 'My_Project')"
 
+# --- validate_cpus ---
+for good in 1 4 8 16; do check_true validate_cpus "$good"; done
+for bad  in 0 8x '' 1.5 -2 abc; do check_false validate_cpus "$bad"; done
+
+# --- validate_size (field-name arg + value arg) ---
+for good in 16GiB 512MiB 120GiB 8G 4; do check_true validate_size memory "$good"; done
+for bad  in 8x GiB '' '4 GiB' 16XB; do check_false validate_size memory "$bad"; done
+
 if [[ "$fail" -eq 0 ]]; then echo "ALL PASS"; else echo "SOME FAILED"; fi
 exit "$fail"

@@ -56,6 +56,24 @@ validate_name() {
   fi
 }
 
+# Assert a value is a positive integer (Lima's `cpus`). Prints a friendly error
+# and returns 1 on failure (callers run it bare under `set -e`, like validate_name).
+validate_cpus() {
+  if ! [[ "$1" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'Error: invalid cpus %q in .ai-dev-vm.yaml (expected a positive integer)\n' "$1" >&2
+    return 1
+  fi
+}
+
+# Assert a value is a Lima size string (memory/disk), e.g. 4GiB, 512MiB, 8G.
+# $1 = field name (for the message), $2 = value.
+validate_size() {
+  if ! [[ "$2" =~ ^[0-9]+(\.[0-9]+)?([KMGT]i?B?)?$ ]]; then
+    printf 'Error: invalid %s %q in .ai-dev-vm.yaml (expected a size like 16GiB)\n' "$1" "$2" >&2
+    return 1
+  fi
+}
+
 # Resolve the VM name when no argument was given: require .ai-dev-vm.yaml in cwd.
 resolve_name_from_cwd() {
   [[ -f "$PWD/.ai-dev-vm.yaml" ]] || die "no .ai-dev-vm.yaml in current directory; pass a project name or cd into a project"
@@ -107,10 +125,7 @@ run_module() {
   local vm_name="$1" vm_user="$2" project_name="$3" mod="$4"
   [[ "$mod" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid module name: $mod"
   local module_file="$REPO_DIR/modules/${mod}.sh"
-  if [[ ! -f "$module_file" ]]; then
-    warn "module '$mod' not found at $module_file, skipping"
-    return 0
-  fi
+  [[ -f "$module_file" ]] || die "module '$mod' not found at $module_file"
   info "Running module: $mod"
   # shellcheck disable=SC2016
   limactl shell "$vm_name" sudo bash -c '
