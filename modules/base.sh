@@ -34,6 +34,11 @@ if [ -d "$CA_DIR" ]; then
     # Node.js/npm uses its own CA bundle; point it to the system bundle
     echo "export NODE_EXTRA_CA_CERTS=\"$CA_BUNDLE\"" > /etc/profile.d/custom-ca.sh
     export NODE_EXTRA_CA_CERTS="$CA_BUNDLE"
+    # `vm shell` runs a non-login shell that skips profile.d; also record it in
+    # /etc/environment (read by PAM for SSH sessions), written idempotently.
+    touch /etc/environment
+    sed -i '/^NODE_EXTRA_CA_CERTS=/d' /etc/environment
+    echo "NODE_EXTRA_CA_CERTS=$CA_BUNDLE" >> /etc/environment
   else
     rm -f "$CA_BUNDLE.tmp"
   fi
