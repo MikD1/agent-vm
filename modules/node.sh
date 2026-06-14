@@ -20,11 +20,11 @@ if ! command -v node >/dev/null 2>&1; then
     > /etc/apt/sources.list.d/nodesource.list
   apt-get update
   apt-get install -y nodejs
-fi
 
-# Enable pnpm/yarn via corepack. Surface failures instead of swallowing them
-# with `|| true`; don't abort the module (Node is the hard requirement,
-# pnpm/yarn are best-effort).
-corepack enable || echo "Warning: 'corepack enable' failed; pnpm/yarn may be unavailable" >&2
-corepack install --global pnpm@latest || echo "Warning: failed to install pnpm via corepack" >&2
-corepack install --global yarn@stable || echo "Warning: failed to install yarn via corepack" >&2
+  # Enable pnpm/yarn via corepack. Surface failures instead of swallowing them
+  # with `|| true`; don't abort the module (Node is the hard requirement,
+  # pnpm/yarn are best-effort).
+  corepack enable || echo "Warning: 'corepack enable' failed; pnpm/yarn may be unavailable" >&2
+  corepack install --global pnpm@latest || echo "Warning: failed to install pnpm via corepack" >&2
+  corepack install --global yarn@stable || echo "Warning: failed to install yarn via corepack" >&2
+fi
