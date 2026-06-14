@@ -127,6 +127,7 @@ Each `resources` field is optional; omitted fields keep the default. Values pass
 |--------|-------------|
 | `node` | Node.js (LTS, pinned to Node 24.x via NodeSource) + npm + pnpm + yarn |
 | `dotnet` | .NET SDK (latest LTS) |
+| `go` | Go toolchain (latest stable, from go.dev) + `~/go/bin` on PATH |
 | `docker` | Docker CE |
 | `claude` | Claude Code CLI |
 
