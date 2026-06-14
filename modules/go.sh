@@ -20,14 +20,23 @@ if ! command -v go >/dev/null 2>&1; then
   ARCH="$(dpkg --print-architecture)"
   TARBALL="${GO_VERSION}.linux-${ARCH}.tar.gz"
 
+  # The tarball is unsigned, and go.dev serves no flat <file>.sha256 (that path
+  # returns an HTML redirect with HTTP 200, not a digest, so `curl -f` can't
+  # catch it). Pull the expected digest from go.dev's JSON release index instead,
+  # matched to the exact filename, and sanity-check that it really is a SHA-256
+  # before trusting it — so a future endpoint change fails loudly here rather
+  # than feeding garbage to sha256sum. jq comes from the base module (runs first).
+  EXPECTED="$(curl -fsSL 'https://go.dev/dl/?mode=json' \
+    | jq -r --arg f "$TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
+  [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ ]] \
+    || { echo "Error: no valid SHA-256 for $TARBALL from go.dev's release index" >&2; exit 1; }
+
   # Download to /var/tmp (main disk); /tmp is a small tmpfs the ~150MB archive
   # can overflow (the same gotcha the dotnet module hit).
   ARCHIVE="/var/tmp/${TARBALL}"
   curl -fsSL "https://go.dev/dl/${TARBALL}" -o "$ARCHIVE"
 
-  # The tarball is unsigned; verify the SHA-256 go.dev publishes alongside it
-  # before trusting the contents.
-  EXPECTED="$(curl -fsSL "https://go.dev/dl/${TARBALL}.sha256")"
+  # Verify the download against the digest from the index before extracting.
   echo "${EXPECTED}  ${ARCHIVE}" | sha256sum -c -
 
   # go.dev's instructions: remove any prior tree, then extract fresh.
