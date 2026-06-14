@@ -8,7 +8,9 @@ if ! command -v dotnet >/dev/null 2>&1; then
   chmod +x /tmp/dotnet-install.sh
 
   mkdir -p /opt/dotnet
-  /tmp/dotnet-install.sh --channel LTS --install-dir /opt/dotnet
+  # TMPDIR redirects dotnet-install.sh's extraction to /var/tmp (on the main
+  # disk) instead of the default /tmp tmpfs which is too small for the SDK.
+  TMPDIR=/var/tmp /tmp/dotnet-install.sh --channel LTS --install-dir /opt/dotnet
 
   ln -sf /opt/dotnet/dotnet /usr/local/bin/dotnet
 

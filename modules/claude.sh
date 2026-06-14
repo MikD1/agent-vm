@@ -26,6 +26,8 @@ fi
 # the exit code unconditionally.
 PLUGINS_FILE="${VM_SECRETS}/modules/claude/plugins"
 if [ -f "$PLUGINS_FILE" ]; then
+  sudo -u "${VM_USER}" -H claude plugin marketplace add anthropics/claude-plugins-official 2>/dev/null || true
+  sudo -u "${VM_USER}" -H claude plugin marketplace update claude-plugins-official || true
   while IFS= read -r plugin || [ -n "$plugin" ]; do
     [[ -z "$plugin" || "$plugin" =~ ^# ]] && continue
     echo "Installing Claude plugin: $plugin"
