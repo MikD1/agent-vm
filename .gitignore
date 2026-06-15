@@ -6,3 +6,5 @@ local/
 *.crt
 .DS_Store
 docs/superpowers/
+/bin/
+*.test
