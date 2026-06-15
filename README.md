@@ -1,191 +1,134 @@
-# AI Dev VM
+# agent-vm
 
-Modular Linux VM environment for AI-assisted development on macOS via [Lima](https://lima-vm.io/).
-
-Each project gets an isolated VM with only the tools it needs. Modules are selected per-project via a `.ai-dev-vm.yaml` config file, and the whole lifecycle is driven by the `vm` command.
+Isolated Linux development VMs for AI-assisted work on macOS, one VM per project,
+via [Lima](https://lima-vm.io/). Each VM carries only the tools its project selects.
+Driven by a single Go binary, `avm`.
 
 ## Prerequisites
 
 ```bash
-brew install lima yq
+brew install lima
 ```
 
 ## Install
 
-From the cloned repo:
-
 ```bash
-./install.sh
+go install github.com/MikD1/agent-vm/cmd/avm@latest
 ```
 
-To remove the `vm` symlink that install.sh added:
+## Usage
+
+### Scenario A — mount mode (code on the host)
+
+The host project directory is mounted into the VM; you edit on the host and the VM
+sees the changes. Commit/diff/branch inside the VM; push/pull on the host where
+credentials live.
 
 ```bash
-./uninstall.sh
+cd ~/projects/my-api
+avm init                 # write .agent-vm.yaml, then edit it to select modules
+avm create               # create + provision the VM (Record + VM)
+avm shell                # open a shell at the workspace
 ```
 
-It never touches third-party tools (lima, yq, brew), your Lima VMs, or `~/.config/ai-dev-vm` (which may hold a customized `.gitconfig`) — it points those out so you can clean them up yourself.
+### Scenario B — clone mode (code never on the host)
 
-## Quick Start
+No host mount: the repo is cloned inside the VM, authenticated through your
+forwarded SSH agent (keys stay on the host). The VM Record is the only host-side
+description of the VM.
 
 ```bash
-cd ~/projects/my-project
-vm init
-# edit .ai-dev-vm.yaml
-vm create
-vm shell
+avm create --repo=git@github.com:acme/my-api.git --modules=node,claude
+avm shell my-api
 ```
 
-Run inside a project directory (one containing `.ai-dev-vm.yaml`) and `vm` uses that project automatically — the VM name is the directory's basename. You can also target any VM by name from anywhere, e.g. `vm shell my-project`. The name is normalized to a lowercase DNS label (Lima's requirement): uppercase becomes lowercase and other characters become hyphens, so a directory named `My_Project` yields the VM name `my-project`. Because the name is just the basename, two directories with the same basename (e.g. `~/work/api` and `~/personal/api`) map to the same VM; `vm create` refuses the second with an "already exists" error.
+With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
+(`node`, `claude`) is installed.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `vm init [path]` | Write a commented `.ai-dev-vm.yaml` template (default: current dir). `--force` overwrites. |
-| `vm create [path]` | Create + start a VM from a project dir (default: current dir). |
-| `vm list` | List all Lima VMs. |
-| `vm shell [name]` | Open a shell in the VM. |
-| `vm start [name]` | Start a stopped VM. |
-| `vm stop [name]` | Stop a running VM. |
-| `vm restart [name]` | Restart a VM. |
-| `vm delete [name]` | Stop and delete a VM. `--force` skips the confirmation. |
+| `avm init [path]` | Write a `.agent-vm.yaml` template. `--force` overwrites. |
+| `avm create [path]` | Mount mode from a project dir. |
+| `avm create --repo=URL` | Clone mode (`--ref`, `--modules`, `--cpus`, `--memory`, `--disk`, `--base-image`). |
+| `avm recreate <name>` | Pristine rebuild from the record (clone mode re-clones — commit & push first). |
+| `avm list` | List VMs: managed / orphaned / unmanaged. |
+| `avm shell [name]` | Open a shell in the VM. |
+| `avm start/stop/restart [name]` | Lifecycle controls. |
+| `avm delete <name>` | Stop + delete the VM and remove its record. `--force` skips confirmation. |
+| `avm prune [name]` | Remove orphaned records (record without a VM). |
 
-`[name]` defaults to the current project; `[path]` defaults to the current directory.
+`[name]` defaults to the current project (the `.agent-vm.yaml` directory's basename).
 
-To connect from VS Code: Remote-SSH → `lima-<name>`.
-
-Git inside the VM: commit, diff, log, branch, rebase — all local. Git on the host: push, pull, fetch — where credentials live.
-
-To change a VM's resources or modules, re-create it: `vm delete <name>` then `vm create`.
-
-## How It Works
-
-```mermaid
-graph TB
-    subgraph Host["Host"]
-        config["~/.config/ai-dev-vm/<br/>(secrets &amp; module configs)"]
-        project["~/projects/my-project/<br/>.ai-dev-vm.yaml"]
-        cli["vm create"]
-    end
-
-    subgraph VM["Lima VM: my-project"]
-        secrets["/mnt/host/ai-dev-vm<br/><i>read-only</i>"]
-        workdir["/home/user.guest/my-project<br/><i>writable</i>"]
-        subgraph Modules["Module execution (as root)"]
-            direction LR
-            base["base.sh<br/>always first"]
-            mod1["module 1"]
-            mod2["module 2"]
-            base --> mod1 --> mod2
-        end
-    end
-
-    config -- "virtiofs mount" --> secrets
-    project -- "virtiofs mount<br/>(added by vm create)" --> workdir
-    cli -- "reads .ai-dev-vm.yaml" --> project
-    cli -- "creates VM from base.yaml<br/>runs modules in order" --> VM
-    secrets -- "$VM_SECRETS" --> Modules
-```
-
-`vm create` does the following:
-
-1. Reads `.ai-dev-vm.yaml` from the project root to get the list of modules
-2. Creates a Lima VM from `base.yaml` and adds a writable mount for the project directory
-3. Runs `base.sh` (always), then each module from the config in order
-
-Each module runs as root with these environment variables:
-
-| Variable | Value | Description |
-|----------|-------|-------------|
-| `VM_USER` | auto-detected | Unprivileged user in the VM |
-| `VM_PROJECT` | project name | Used in paths |
-| `VM_SECRETS` | `/mnt/host/ai-dev-vm` | Read-only mount of `~/.config/ai-dev-vm` |
-
-Module-specific configs go in `~/.config/ai-dev-vm/modules/<name>/` on the host and are accessible inside modules at `$VM_SECRETS/modules/<name>/`.
-
-## Project Config
-
-`.ai-dev-vm.yaml` selects modules and, optionally, VM resources:
+## Project config — `.agent-vm.yaml`
 
 ```yaml
-modules:
-  - node
-  - docker
-  - claude
+modules: [node, docker, claude]
 resources:
-  cpus: 8        # default: 4
-  memory: 16GiB  # default: 4GiB
-  disk: 200GiB   # default: 120GiB
+  cpus: 8        # default 4
+  memory: 16GiB  # default 4GiB
+  disk: 200GiB   # default 120GiB
+# base: { image: corp-ubuntu }   # optional; default template:_images/ubuntu
 ```
-
-Each `resources` field is optional; omitted fields keep the default. Values pass straight to Lima, so use Lima's formats (a plain integer for `cpus`, a size string like `16GiB` for `memory`/`disk`).
 
 ## Modules
 
 | Module | Description |
 |--------|-------------|
-| `node` | Node.js (LTS, pinned to Node 24.x via NodeSource) + npm + pnpm + yarn |
-| `dotnet` | .NET SDK (latest LTS) |
-| `go` | Go toolchain (latest stable, from go.dev) + `~/go/bin` on PATH |
+| `node` | Node.js LTS + npm/pnpm/yarn |
+| `dotnet` | .NET SDK (LTS) |
+| `go` | Go toolchain (latest stable) |
 | `docker` | Docker CE |
-| `claude` | Claude Code CLI |
+| `claude` | Claude Code CLI (needs `node`) |
 
-The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed automatically.
+The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed.
 
-## Custom CA Certificates
+## How it works
 
-If your network uses SSL inspection (corporate proxy), place root CA certificates in PEM format into:
+`avm` is a Go orchestrator over three layers with narrow interfaces:
 
-```bash
-mkdir -p ~/.config/ai-dev-vm/ca-certificates
-cp your-corp-ca.pem ~/.config/ai-dev-vm/ca-certificates/
-```
+1. **Go CLI** parses config, owns the registry, and plans provisioning. It is the
+   only thing that reasons in domain terms.
+2. **Lima** virtualizes: `avm` shells out to `limactl` (a stable CLI contract) to
+   create/start/shell/delete VMs.
+3. **Bash provisioning** runs inside the guest in a fixed phase sequence.
 
-`base.sh` installs them into the VM's system trust store before other modules run.
+### Two config artifacts
 
-## Module Configuration
+- **Project Spec** (`.agent-vm.yaml`, in your repo) — portable *intent*: modules,
+  resources, optional base image.
+- **VM Record** (`~/.config/agent-vm/vms/<name>.yaml`, host-local) — the tool's
+  *materialization* of one Lima VM (resolved spec + create-time facts). `avm`
+  reconciles the registry against Lima on every `list` and labels each VM
+  **managed**, **orphaned** (record without VM), or **unmanaged** (VM without
+  record). `create` writes the record first; if provisioning fails the VM is rolled
+  back and the record is kept as orphaned, recoverable via `recreate`/`prune`.
 
-### claude
-
-Create `~/.config/ai-dev-vm/modules/claude/settings.json` with your Claude Code settings. To supply an API key, use the `env` block:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_API_KEY": "your-key-here"
-  }
-}
-```
-
-`settings.json` holds general Claude Code settings — there is no `apiKey` field. Provide the key via the `ANTHROPIC_API_KEY` environment variable (as in the `env` block above), or via `apiKeyHelper` for a command-sourced key that isn't stored in plaintext.
-
-To pre-install plugins, create `~/.config/ai-dev-vm/modules/claude/plugins` with one plugin name per line:
+### Provisioning phases
 
 ```
-superpowers
+Phase 0  create + start the VM from the base image
+Phase 1  system layer — install host CA certs into the trust store, export trust
+         env globally (modules never touch certificates)
+Phase 2  base module — git, curl, jq, ripgrep, fd, build-essential, sanitized gitconfig
+Phase 3  feature modules in spec order (node, dotnet, go, docker, claude)
+Phase 4  workspace — mount is already present; clone runs `git clone` via the
+         forwarded SSH agent
 ```
 
-Lines starting with `#` are ignored.
+Each script runs as root with a small env contract: `VM_USER`, `VM_PROJECT`,
+`VM_WORKSPACE`, `VM_SECRETS` (`/mnt/host/agent-vm`, read-only).
 
-## Adding a Module
+### Custom CA certificates
 
-Create `modules/<name>.sh` following the module contract:
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-# Runs as root, DEBIAN_FRONTEND=noninteractive
-# Available env vars: VM_USER, VM_PROJECT, VM_SECRETS
-```
-
-Then use `<name>` in `.ai-dev-vm.yaml`.
-
-Module config files (if needed) go in `~/.config/ai-dev-vm/modules/<name>/` on the host, accessible inside the module at `$VM_SECRETS/modules/<name>/`.
+Drop PEM root CAs into `~/.config/agent-vm/ca-certificates/`; the Phase 1 system
+layer installs them into the VM trust store and exports the trust env globally, so
+node/git/python/curl all inherit it with no per-module configuration.
 
 ## Security
 
-- Each project is isolated in its own VM
-- Secrets mounted read-only from host, loaded only in subshells
-- Git credentials stay on host — no duplication
-- SSH agent forwarding disabled
+- Each project is isolated in its own VM.
+- Secrets are mounted read-only from the host.
+- Git credentials stay on the host (mount mode) or in the forwarded SSH agent
+  (clone mode) — keys never leave the host.
