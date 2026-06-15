@@ -31,6 +31,22 @@ func TestRunDeleteRemovesVMAndRecord(t *testing.T) {
 	if ok {
 		t.Error("record must be removed by delete")
 	}
+	// Verify stop and delete were called on the Lima client.
+	sawStop, sawDelete := false, false
+	for _, op := range r.ops {
+		if op == "stop" {
+			sawStop = true
+		}
+		if op == "delete" {
+			sawDelete = true
+		}
+	}
+	if !sawStop {
+		t.Error("runDelete must call Stop on the Lima client")
+	}
+	if !sawDelete {
+		t.Error("runDelete must call Delete on the Lima client")
+	}
 }
 
 // namesRunner returns a fixed list of Lima VM names for reconciliation.

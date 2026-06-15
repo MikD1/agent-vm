@@ -51,15 +51,14 @@ func newPruneCmd() *cobra.Command {
 				return err
 			}
 			pruned, err := runPrune(cmd.Context(), lima.New(lima.ExecRunner{}), registry.NewStore(root), name)
+			for _, n := range pruned {
+				fmt.Printf("Pruned: %s\n", n)
+			}
 			if err != nil {
 				return err
 			}
 			if len(pruned) == 0 {
 				fmt.Println("No orphaned records to prune.")
-				return nil
-			}
-			for _, n := range pruned {
-				fmt.Printf("Pruned: %s\n", n)
 			}
 			return nil
 		},

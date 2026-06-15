@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -23,16 +24,12 @@ func recordToResolved(rec registry.Record) config.Resolved {
 // runRecreate reads the Record, deletes any existing VM, and rebuilds pristinely.
 // The Record is NOT rewritten (it is the source of truth for recreation).
 func runRecreate(ctx context.Context, deps createDeps, name, guestHome string) error {
-	exists, err := deps.store.Exists(name)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("no record for %q; nothing to recreate", name)
-	}
 	rec, err := deps.store.Read(name)
 	if err != nil {
-		return err
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("no record for %q; nothing to recreate", name)
+		}
+		return fmt.Errorf("read record for %q: %w", name, err)
 	}
 	r := recordToResolved(rec)
 
@@ -79,7 +76,7 @@ func newRecreateCmd() *cobra.Command {
 			store := registry.NewStore(root)
 			rec, err := store.Read(args[0])
 			if err != nil {
-				return fmt.Errorf("no record for %q; nothing to recreate", args[0])
+				return fmt.Errorf("no record for %q: %w", args[0], err)
 			}
 			infoJSON, err := limaClient.InfoRaw(ctx)
 			if err != nil {

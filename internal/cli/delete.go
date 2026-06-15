@@ -11,8 +11,10 @@ import (
 
 // runDelete stops+deletes the VM and removes its Record.
 func runDelete(ctx context.Context, c *lima.Client, store *registry.Store, name string) error {
-	_ = c.Stop(ctx, name)   // best-effort
-	_ = c.Delete(ctx, name) // force delete; ignore "absent"
+	_ = c.Stop(ctx, name) // best-effort: ignore error, VM may already be stopped
+	if err := c.Delete(ctx, name); err != nil {
+		return fmt.Errorf("delete VM %q: %w", name, err)
+	}
 	return store.Delete(name)
 }
 
