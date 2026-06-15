@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pick up custom CA bundle for npm (created by base.sh)
-[ -f /etc/ssl/certs/custom-ca-bundle.pem ] && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/custom-ca-bundle.pem
-
 # Install Claude Code CLI via npm
 command -v npm >/dev/null 2>&1 || { echo "Error: claude module requires npm (add node module first)"; exit 1; }
 npm install -g @anthropic-ai/claude-code

@@ -3,9 +3,6 @@ set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive
 
-# Pick up custom CA bundle for corepack/npm (created by base.sh)
-[ -f /etc/ssl/certs/custom-ca-bundle.pem ] && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/custom-ca-bundle.pem
-
 # Install Node from NodeSource. The old setup_lts.x convenience script is
 # deprecated, so configure the apt repo directly. NodeSource's per-distro repos
 # have no "lts" alias, so we pin a major version; bump NODE_MAJOR to track a
