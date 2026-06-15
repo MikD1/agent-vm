@@ -23,7 +23,7 @@ func recordToResolved(rec registry.Record) config.Resolved {
 
 // runRecreate reads the Record, deletes any existing VM, and rebuilds pristinely.
 // The Record is NOT rewritten (it is the source of truth for recreation).
-func runRecreate(ctx context.Context, deps createDeps, name, guestHome string) error {
+func runRecreate(ctx context.Context, deps createDeps, name string) error {
 	rec, err := deps.store.Read(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -33,7 +33,16 @@ func runRecreate(ctx context.Context, deps createDeps, name, guestHome string) e
 	}
 	r := recordToResolved(rec)
 
-	limaYAML, err := buildLimaConfig(r, guestHome)
+	infoJSON, err := deps.lima.InfoRaw(ctx)
+	if err != nil {
+		return fmt.Errorf("limactl info: %w", err)
+	}
+	guestHomeVal, err := guestHome(infoJSON, rec.User)
+	if err != nil {
+		return err
+	}
+
+	limaYAML, err := buildLimaConfig(r, guestHomeVal)
 	if err != nil {
 		return err
 	}
@@ -74,20 +83,8 @@ func newRecreateCmd() *cobra.Command {
 				return err
 			}
 			store := registry.NewStore(root)
-			rec, err := store.Read(args[0])
-			if err != nil {
-				return fmt.Errorf("no record for %q: %w", args[0], err)
-			}
-			infoJSON, err := limaClient.InfoRaw(ctx)
-			if err != nil {
-				return err
-			}
-			home, err := guestHome(infoJSON, rec.User)
-			if err != nil {
-				return err
-			}
 			deps := createDeps{lima: limaClient, store: store, externalDir: externalModuleDir(root)}
-			return runRecreate(ctx, deps, args[0], home)
+			return runRecreate(ctx, deps, args[0])
 		},
 	}
 }

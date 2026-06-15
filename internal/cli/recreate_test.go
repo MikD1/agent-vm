@@ -21,7 +21,7 @@ func TestRecreateFromRecord(t *testing.T) {
 	_ = store.Write(rec)
 	r := &okRunner{}
 	deps := createDeps{lima: lima.New(r), store: store}
-	if err := runRecreate(context.Background(), deps, "my-api", "/home/me"); err != nil {
+	if err := runRecreate(context.Background(), deps, "my-api"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := store.Exists("my-api"); !ok {
@@ -39,7 +39,7 @@ func TestRecreateFromRecord(t *testing.T) {
 func TestRecreateMissingRecord(t *testing.T) {
 	store := registry.NewStore(t.TempDir())
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "ghost", "/home/me"); err == nil {
+	if err := runRecreate(context.Background(), deps, "ghost"); err == nil {
 		t.Error("want error recreating a VM with no record")
 	}
 }
