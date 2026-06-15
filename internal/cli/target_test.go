@@ -10,6 +10,8 @@ func TestDeriveGuestUser(t *testing.T) {
 		"Alice":       "alice",
 		"m.doshevsky": "m_doshevsky",
 		"9bad":        "_9bad",
+		"-leading":    "_-leading",
+		"":            "_",
 	}
 	for in, want := range cases {
 		if got := deriveGuestUser(in); got != want {
@@ -57,6 +59,18 @@ func TestResolveTargetName(t *testing.T) {
 	// error when no arg and no spec
 	if _, err := resolveTargetName("", dir); err == nil {
 		t.Error("want error with no arg and no spec")
+	}
+}
+
+func TestGuestHomeRealistic(t *testing.T) {
+	// Realistic Lima output: name is a plain username, home has .linux suffix.
+	info := []byte(`{"defaultTemplate":{"user":{"name":"alice","home":"/home/alice.linux"}}}`)
+	home, err := guestHome(info, "bob")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home != "/home/bob.linux" {
+		t.Errorf("guestHome = %q, want /home/bob.linux", home)
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,15 +12,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var nonUser = regexp.MustCompile(`[^a-z0-9_-]`)
+var (
+	nonUser     = regexp.MustCompile(`[^a-z0-9_-]`)
+	startsAlpha = regexp.MustCompile(`^[a-z_]`)
+)
 
 // deriveGuestUser turns the host username into a valid Linux username (Lima rules).
 func deriveGuestUser(hostUser string) string {
 	u := nonUser.ReplaceAllString(strings.ToLower(hostUser), "_")
-	if u == "" || !regexp.MustCompile(`^[a-z_]`).MatchString(u) {
+	if !startsAlpha.MatchString(u) {
+		if len(u) > 31 {
+			u = u[:31]
+		}
 		u = "_" + u
-	}
-	if len(u) > 32 {
+	} else if len(u) > 32 {
 		u = u[:32]
 	}
 	return u
@@ -55,7 +61,10 @@ func resolveTargetName(name, dir string) (string, error) {
 	}
 	spec := filepath.Join(dir, ".agent-vm.yaml")
 	if _, err := os.Stat(spec); err != nil {
-		return "", fmt.Errorf("no .agent-vm.yaml in %s; pass a VM name or cd into a project", dir)
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("no .agent-vm.yaml in %s; pass a VM name or cd into a project", dir)
+		}
+		return "", err
 	}
 	return vmname.Normalize(filepath.Base(dir))
 }
