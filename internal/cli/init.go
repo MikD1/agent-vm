@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,8 +12,18 @@ import (
 
 func runInit(dir string, force bool) error {
 	dest := filepath.Join(dir, ".agent-vm.yaml")
-	if _, err := os.Stat(dest); err == nil && !force {
-		return fmt.Errorf(".agent-vm.yaml already exists in %s (use --force to overwrite)", dir)
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("directory not found: %s", dir)
+		}
+		return err
+	}
+	if _, err := os.Stat(dest); err == nil {
+		if !force {
+			return fmt.Errorf(".agent-vm.yaml already exists in %s (use --force to overwrite)", dir)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
 	if err := os.WriteFile(dest, templates.SpecTemplate, 0o644); err != nil {
 		return err

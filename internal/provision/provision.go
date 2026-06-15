@@ -5,6 +5,7 @@ package provision
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/lima"
@@ -85,7 +86,14 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 // cloneWorkspace runs `git clone` inside the guest as the VM user via the
 // forwarded SSH agent.
 func (p *Provisioner) cloneWorkspace(ctx context.Context, r config.Resolved) error {
-	script := fmt.Sprintf(`sudo -u %q -H git clone --branch %q %q %q`,
-		r.User, r.Workspace.Ref, r.Workspace.Repo, r.Workspace.GuestPath)
+	script := fmt.Sprintf("sudo -u %s -H git clone --branch %s %s %s",
+		shellQuote(r.User), shellQuote(r.Workspace.Ref),
+		shellQuote(r.Workspace.Repo), shellQuote(r.Workspace.GuestPath))
 	return p.lima.Provision(ctx, r.Name, []byte(script), p.env(r))
+}
+
+// shellQuote wraps s in single quotes and escapes any embedded single quotes,
+// producing a bash-safe argument regardless of the string's content.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
