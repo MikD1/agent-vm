@@ -1,4 +1,4 @@
-# ai-dev-vm project config. Uncomment the modules you need.
+# agent-vm project config. Uncomment the modules you need.
 modules:
   # - node      # Node.js LTS + npm/pnpm/yarn
   # - dotnet    # .NET SDK (LTS)

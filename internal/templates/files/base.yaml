@@ -1,0 +1,28 @@
+minimumLimaVersion: "2.1.0"
+
+base:
+  - template:_images/ubuntu
+
+vmType: "vz"
+arch: "default"
+
+cpus: 4
+memory: "4GiB"
+disk: "120GiB"
+
+mountType: "virtiofs"
+
+mounts:
+  - location: "~/.config/agent-vm"
+    mountPoint: "/mnt/host/agent-vm"
+    writable: false
+
+ssh:
+  loadDotSSHPubKeys: true
+  forwardAgent: false
+
+containerd:
+  system: false
+  user: false
+
+propagateProxyEnv: true
