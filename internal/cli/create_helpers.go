@@ -1,14 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	"github.com/MikD1/agent-vm/internal/config"
-	"github.com/MikD1/agent-vm/internal/modules"
-	"github.com/MikD1/agent-vm/internal/registry"
 	"github.com/MikD1/agent-vm/internal/vmname"
 )
 
@@ -19,21 +19,13 @@ func osUsername() string {
 	return "user"
 }
 
-// externalModuleDir returns the user module dir (~/.config/agent-vm/modules.d) if it exists.
-func externalModuleDir() string {
-	root, err := registry.DefaultRoot()
-	if err != nil {
-		return ""
-	}
+// externalModuleDir returns the user module dir (<root>/modules.d) if it exists.
+func externalModuleDir(root string) string {
 	dir := filepath.Join(root, "modules.d")
 	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
 		return dir
 	}
 	return ""
-}
-
-func moduleKnown(name, externalDir string) bool {
-	return modules.Exists(name, externalDir)
 }
 
 // projectName derives the VM name: for clone mode, from the repo basename;
@@ -46,15 +38,7 @@ func projectName(f config.Flags, dir string) (string, error) {
 }
 
 func repoBasename(repo string) string {
-	b := filepath.Base(repo)
-	return trimSuffix(b, ".git")
-}
-
-func trimSuffix(s, suf string) string {
-	if len(s) >= len(suf) && s[len(s)-len(suf):] == suf {
-		return s[:len(s)-len(suf)]
-	}
-	return s
+	return strings.TrimSuffix(filepath.Base(repo), ".git")
 }
 
 // loadSpecForCreate loads the in-repo spec for mount mode (required).
@@ -65,14 +49,16 @@ func loadSpecForCreate(f config.Flags, dir string) (config.Spec, bool, string, e
 	}
 	specPath := filepath.Join(dir, ".agent-vm.yaml")
 	if _, err := os.Stat(specPath); err != nil {
-		return config.Spec{}, false, "", errSpecRequired(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			return config.Spec{}, false, "", errSpecRequired(dir)
+		}
+		return config.Spec{}, false, "", err
 	}
 	s, err := config.Load(specPath)
 	if err != nil {
 		return config.Spec{}, false, "", err
 	}
-	abs, _ := filepath.Abs(dir)
-	return s, true, abs, nil
+	return s, true, dir, nil
 }
 
 func errSpecRequired(dir string) error {

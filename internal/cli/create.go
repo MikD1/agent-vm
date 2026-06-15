@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/lima"
+	"github.com/MikD1/agent-vm/internal/modules"
 	"github.com/MikD1/agent-vm/internal/provision"
 	"github.com/MikD1/agent-vm/internal/registry"
 	"github.com/MikD1/agent-vm/internal/vmname"
@@ -56,9 +58,12 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 
 	// Build the VM. On failure: roll the VM artifact back, KEEP the Record.
 	p := provision.New(deps.lima, deps.externalDir)
-	if err := p.Run(ctx, r, tmp.Name()); err != nil {
-		_ = deps.lima.Delete(ctx, r.Name) // best-effort rollback of the VM artifact
-		return fmt.Errorf("%w\nVM rolled back; record kept. Run `avm recreate %s` to retry or `avm prune %s` to discard", err, r.Name, r.Name)
+	if provErr := p.Run(ctx, r, tmp.Name()); provErr != nil {
+		rollbackMsg := "VM rolled back"
+		if delErr := deps.lima.Delete(ctx, r.Name); delErr != nil {
+			rollbackMsg = fmt.Sprintf("VM rollback attempted but may have failed (%v); verify with `limactl list`", delErr)
+		}
+		return fmt.Errorf("%w\n%s; record kept. Run `avm recreate %s` to retry or `avm prune %s` to discard", provErr, rollbackMsg, r.Name, r.Name)
 	}
 	fmt.Printf("VM ready: %s\nConnect: avm shell %s\n", r.Name, r.Name)
 	return nil
@@ -79,7 +84,10 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 			if len(args) == 1 {
-				absDir = args[0]
+				absDir, err = filepath.Abs(args[0])
+				if err != nil {
+					return err
+				}
 			}
 
 			limaClient := lima.New(lima.ExecRunner{})
@@ -98,11 +106,17 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
+			root, err := registry.DefaultRoot()
+			if err != nil {
+				return err
+			}
+			extDir := externalModuleDir(root)
+
 			spec, specPresent, hostPath, err := loadSpecForCreate(f, absDir)
 			if err != nil {
 				return err
 			}
-			known := func(m string) bool { return moduleKnown(m, externalModuleDir()) }
+			known := func(m string) bool { return modules.Exists(m, extDir) }
 			if err := spec.Validate(known); err != nil {
 				return err
 			}
@@ -122,14 +136,10 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
-			root, err := registry.DefaultRoot()
-			if err != nil {
-				return err
-			}
 			deps := createDeps{
 				lima:        limaClient,
 				store:       registry.NewStore(root),
-				externalDir: externalModuleDir(),
+				externalDir: extDir,
 			}
 			return runCreate(ctx, deps, resolved, home, time.Now())
 		},
