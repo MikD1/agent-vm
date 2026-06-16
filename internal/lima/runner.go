@@ -5,6 +5,8 @@ package lima
 import (
 	"bytes"
 	"context"
+	"io"
+	"os"
 	"os/exec"
 )
 
@@ -13,7 +15,9 @@ type CommandRunner interface {
 	Run(ctx context.Context, stdin []byte, args ...string) (stdout, stderr []byte, err error)
 }
 
-// ExecRunner runs the real limactl binary.
+// ExecRunner runs the real limactl binary. It streams limactl's stderr
+// directly to os.Stderr so Lima's own progress (image download, VM start)
+// is visible in the terminal.
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, []byte, error) {
@@ -23,7 +27,8 @@ func (ExecRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
-	cmd.Stderr = &errb
+	// MultiWriter: capture stderr for error messages AND stream to terminal.
+	cmd.Stderr = io.MultiWriter(os.Stderr, &errb)
 	err := cmd.Run()
 	return out.Bytes(), errb.Bytes(), err
 }

@@ -44,23 +44,28 @@ func (p *Provisioner) provisionModule(ctx context.Context, r config.Resolved, na
 // any returned error.
 func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath string) error {
 	// Phase 0 — create + start.
+	fmt.Printf("==> Creating VM: %s\n", r.Name)
 	if err := p.lima.Create(ctx, r.Name, limaConfigPath); err != nil {
 		return err
 	}
+	fmt.Printf("==> Starting VM: %s\n", r.Name)
 	if err := p.lima.Start(ctx, r.Name); err != nil {
 		return err
 	}
 	// Phase 1 — system layer.
+	fmt.Printf("==> Phase 1: system layer (CA certificates, trust env)\n")
 	if err := p.provisionModule(ctx, r, "system"); err != nil {
 		return fmt.Errorf("phase 1 (system): %w", err)
 	}
 	// Phase 2 — base module.
+	fmt.Printf("==> Phase 2: base module (git, curl, build tools)\n")
 	if err := p.provisionModule(ctx, r, "base"); err != nil {
 		return fmt.Errorf("phase 2 (base): %w", err)
 	}
 	// Phase 3 — feature modules in spec order.
 	needsRestart := false
 	for _, m := range r.Modules {
+		fmt.Printf("==> Phase 3: module — %s\n", m)
 		if err := p.provisionModule(ctx, r, m); err != nil {
 			return fmt.Errorf("phase 3 (%s): %w", m, err)
 		}
@@ -70,12 +75,14 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	}
 	// Phase 4 — workspace (clone only; mount is already present via virtiofs).
 	if r.Workspace.Mode == config.ModeClone {
+		fmt.Printf("==> Phase 4: cloning workspace\n")
 		if err := p.cloneWorkspace(ctx, r); err != nil {
 			return fmt.Errorf("phase 4 (clone): %w", err)
 		}
 	}
 	// Post — restart only to apply docker group membership.
 	if needsRestart {
+		fmt.Printf("==> Restarting VM to apply docker group membership\n")
 		if err := p.lima.Restart(ctx, r.Name); err != nil {
 			return err
 		}
