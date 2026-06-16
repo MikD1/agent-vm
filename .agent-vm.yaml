@@ -1,0 +1,9 @@
+modules:
+  - node      # Node.js LTS + npm/pnpm/yarn
+  - go        # Go toolchain (latest stable)
+  - claude    # Claude Code CLI (needs node)
+
+resources:
+  cpus: 2
+  memory: 2GiB
+  disk: 40GiB
