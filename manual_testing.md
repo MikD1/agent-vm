@@ -11,6 +11,28 @@ git checkout feat/go-rewrite
 go install ./cmd/avm
 ```
 
+### Corporate CA certificates (required if behind SSL inspection)
+
+If your network uses a corporate proxy with SSL inspection, set this up **before
+creating any VM** — otherwise `curl`/`npm`/`apt` inside the VM will fail with
+certificate errors.
+
+```bash
+mkdir -p ~/.config/agent-vm/ca-certificates
+
+# Export all system CA certs from macOS keychain:
+security find-certificate -a -p /Library/Keychains/System.keychain \
+  > ~/.config/agent-vm/ca-certificates/corp-ca.pem
+
+# Or export a specific cert by name:
+# security find-certificate -c "My Corp CA" -p /Library/Keychains/System.keychain \
+#   > ~/.config/agent-vm/ca-certificates/corp-ca.pem
+```
+
+Phase 1 of provisioning reads `*.pem` files from this directory, installs them
+into the VM trust store, and exports the trust env vars globally — so all modules
+inherit trust transparently.
+
 ---
 
 ## Checklist
