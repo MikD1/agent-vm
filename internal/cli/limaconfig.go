@@ -14,7 +14,7 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 		return nil, err
 	}
 
-	doc["base"] = []map[string]string{{"location": r.Base.Image}}
+	doc["base"] = []any{r.Base.Image}
 	doc["cpus"] = r.Resources.CPUs
 	doc["memory"] = r.Resources.Memory
 	doc["disk"] = r.Resources.Disk
