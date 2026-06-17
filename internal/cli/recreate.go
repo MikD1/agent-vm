@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/MikD1/agent-vm/internal/config"
-	"github.com/MikD1/agent-vm/internal/lima"
 	"github.com/MikD1/agent-vm/internal/provision"
 	"github.com/MikD1/agent-vm/internal/registry"
 	"github.com/spf13/cobra"
@@ -77,7 +76,7 @@ func newRecreateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			limaClient := lima.New(lima.ExecRunner{})
+			limaClient := newLimaClient(cmd)
 			root, err := registry.DefaultRoot()
 			if err != nil {
 				return err

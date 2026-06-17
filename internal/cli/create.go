@@ -90,7 +90,7 @@ func newCreateCmd() *cobra.Command {
 				}
 			}
 
-			limaClient := lima.New(lima.ExecRunner{})
+			limaClient := newLimaClient(cmd)
 
 			projName, err := projectName(f, absDir)
 			if err != nil {

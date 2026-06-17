@@ -32,7 +32,7 @@ func newShellCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			c := lima.New(lima.ExecRunner{})
+			c := newLimaClient(cmd)
 			workdir := workspaceDir(name)
 			return c.Shell(cmd.Context(), name, workdir)
 		},
@@ -66,7 +66,7 @@ func lifecycleCmd(use, short string, fn func(*lima.Client, context.Context, stri
 			if err != nil {
 				return err
 			}
-			if err := fn(lima.New(lima.ExecRunner{}), cmd.Context(), name); err != nil {
+			if err := fn(newLimaClient(cmd), cmd.Context(), name); err != nil {
 				return err
 			}
 			fmt.Printf("%s: %s\n", use, name)

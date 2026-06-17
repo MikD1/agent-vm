@@ -39,7 +39,7 @@ func newDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := runDelete(cmd.Context(), lima.New(lima.ExecRunner{}), registry.NewStore(root), name); err != nil {
+			if err := runDelete(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), name); err != nil {
 				return err
 			}
 			fmt.Printf("Deleted: %s\n", name)

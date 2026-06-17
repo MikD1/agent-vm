@@ -13,6 +13,7 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.PersistentFlags().Bool("verbose", false, "stream the full Lima log (structured prefix stripped)")
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newCreateCmd())
 	root.AddCommand(newListCmd(), newDeleteCmd(), newPruneCmd(), newRecreateCmd())

@@ -40,7 +40,7 @@ func newListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := runList(cmd.Context(), lima.New(lima.ExecRunner{}), registry.NewStore(root))
+			out, err := runList(cmd.Context(), newLimaClient(cmd), registry.NewStore(root))
 			if err != nil {
 				return err
 			}

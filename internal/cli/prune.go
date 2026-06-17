@@ -50,7 +50,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pruned, err := runPrune(cmd.Context(), lima.New(lima.ExecRunner{}), registry.NewStore(root), name)
+			pruned, err := runPrune(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), name)
 			for _, n := range pruned {
 				fmt.Printf("Pruned: %s\n", n)
 			}
