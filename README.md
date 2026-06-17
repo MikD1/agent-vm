@@ -61,6 +61,12 @@ With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
 
 `[name]` defaults to the current project (the `.agent-vm.yaml` directory's basename).
 
+### Global flags
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Show the full Lima log. By default only `avm`'s own `==>` progress plus Lima warnings and errors are shown; with `--verbose` every Lima line is shown. Either way the `time=…level=…` prefix and trailing fields are stripped to plain text. Colors honor `NO_COLOR`. |
+
 ## Project config — `.agent-vm.yaml`
 
 ```yaml

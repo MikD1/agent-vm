@@ -98,6 +98,8 @@ graph TD
 
 Dependency rule: `internal/lima` is the only package that knows about `limactl`; everything else speaks in domain types. `internal/modules` is the only package that knows the embedded/on-disk layout of the bash scripts.
 
+`internal/lima`'s `ExecRunner` filters `limactl`'s logrus-formatted stderr before it reaches the terminal: normal mode shows only warnings and errors, `--verbose` shows every line, and both strip the `time=…level=…` prefix (and trailing key=value fields) down to the message text. The raw stderr is still captured separately to build error messages.
+
 ## 3. Configuration Model: Project Spec vs VM Record
 
 The system has **two** config artifacts with distinct, non-overlapping roles. This separation is the backbone of clone mode and of the registry invariant.
