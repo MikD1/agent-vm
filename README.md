@@ -90,6 +90,33 @@ resources:
 
 The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed.
 
+### Configuring the `claude` module
+
+The `claude` module picks up two optional files from the host secrets directory
+(`~/.config/agent-vm/`, mounted read-only into the VM). Both are applied at
+provision time — edit them before `avm create`, or run `avm recreate <name>` to
+apply changes to an existing VM.
+
+**Settings** — drop a [Claude Code settings file](https://docs.claude.com/en/docs/claude-code/settings)
+at `~/.config/agent-vm/modules/claude/settings.json`. It is copied verbatim to
+`~/.claude/settings.json` inside the VM, so it can carry permissions, environment
+variables, hooks, model selection, and the like.
+
+**Plugins** — list plugins to install, one per line, in
+`~/.config/agent-vm/modules/claude/plugins`:
+
+```
+# blank lines and #-comments are ignored
+some-plugin                  # bare name → official marketplace
+other-plugin@my-marketplace  # name@marketplace → that marketplace
+```
+
+A bare `name` installs from the official marketplace
+(`anthropics/claude-plugins-official`), which the module adds and updates for you;
+`name@marketplace` targets another marketplace, which must already be registered.
+Plugins install at user scope into the VM user's `~/.claude`; one that fails to
+install logs a warning and provisioning continues.
+
 ## How it works
 
 `avm` is a Go orchestrator over three layers with narrow interfaces:
