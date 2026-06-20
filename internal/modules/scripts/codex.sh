@@ -16,7 +16,7 @@ CODEX_DIR="${VM_SECRETS}/modules/codex"
 CONFIG_SRC="${CODEX_DIR}/config.toml"
 AUTH_SRC="${CODEX_DIR}/auth.json"
 if [ -f "$CONFIG_SRC" ] || [ -f "$AUTH_SRC" ]; then
-  sudo -u "${VM_USER}" bash -c "
+  sudo -u "${VM_USER}" -H bash -c "
     mkdir -p \"\$HOME/.codex\"
     if [ -f '$CONFIG_SRC' ]; then
       cp '$CONFIG_SRC' \"\$HOME/.codex/config.toml\"
