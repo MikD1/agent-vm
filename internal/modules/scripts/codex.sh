@@ -7,23 +7,26 @@ set -euo pipefail
 command -v npm >/dev/null 2>&1 || { echo "Error: codex module requires npm (add node module first)"; exit 1; }
 npm install -g @openai/codex
 
-# Seed optional config from the host secrets dir. Both files are optional and
-# copied verbatim into the VM user's ~/.codex. config.toml carries settings and
-# MCP servers ([mcp_servers.<id>] tables); auth.json holds credentials, so it is
-# chmod 600. This module runs standalone in the VM and cannot use lib/common.sh
-# helpers, so it uses plain echo/exit like the claude module.
-CODEX_DIR="${VM_SECRETS}/modules/codex"
-CONFIG_SRC="${CODEX_DIR}/config.toml"
-AUTH_SRC="${CODEX_DIR}/auth.json"
-if [ -f "$CONFIG_SRC" ] || [ -f "$AUTH_SRC" ]; then
+# Write a minimal reference config: full-auto (never prompt), no sandbox.
+# approval_policy="never" skips all approval prompts; sandbox_mode="danger-full-access"
+# removes filesystem/network restrictions. Users can override by editing ~/.codex/config.toml
+# inside the VM after provisioning.
+sudo -u "${VM_USER}" -H bash -c "
+  mkdir -p \"\$HOME/.codex\"
+  cat > \"\$HOME/.codex/config.toml\" <<'EOF'
+# Full-auto YOLO mode: no approval prompts, no sandbox.
+approval_policy = \"never\"
+sandbox_mode = \"danger-full-access\"
+EOF
+"
+
+# Copy auth credentials if provided. auth.json is the file-based credential store
+# written by `codex login`; without it the user must run `codex login` manually
+# or set OPENAI_API_KEY. chmod 600 because it holds credentials.
+AUTH_SRC="${VM_SECRETS}/modules/codex/auth.json"
+if [ -f "$AUTH_SRC" ]; then
   sudo -u "${VM_USER}" -H bash -c "
-    mkdir -p \"\$HOME/.codex\"
-    if [ -f '$CONFIG_SRC' ]; then
-      cp '$CONFIG_SRC' \"\$HOME/.codex/config.toml\"
-    fi
-    if [ -f '$AUTH_SRC' ]; then
-      cp '$AUTH_SRC' \"\$HOME/.codex/auth.json\"
-      chmod 600 \"\$HOME/.codex/auth.json\"
-    fi
+    cp '$AUTH_SRC' \"\$HOME/.codex/auth.json\"
+    chmod 600 \"\$HOME/.codex/auth.json\"
   "
 fi

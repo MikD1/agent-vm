@@ -16,6 +16,12 @@ brew install lima
 go install github.com/MikD1/agent-vm/cmd/avm@latest
 ```
 
+From a local checkout:
+
+```bash
+go install ./cmd/avm
+```
+
 ## Usage
 
 ### Scenario A — mount mode (code on the host)
@@ -121,15 +127,21 @@ install logs a warning and provisioning continues.
 ### Configuring the `codex` module
 
 The `codex` module installs the OpenAI Codex CLI (`npm install -g @openai/codex`)
-and, like `claude`, needs the `node` module installed first. It picks up two
-optional files from the host secrets directory (`~/.config/agent-vm/`, mounted
-read-only into the VM). Both are applied at provision time — edit them before
-`avm create`, or run `avm recreate <name>` to apply changes to an existing VM.
+and, like `claude`, needs the `node` module installed first.
 
-**Config** — drop a [Codex config file](https://developers.openai.com/codex/config-reference)
-at `~/.config/agent-vm/modules/codex/config.toml`. It is copied verbatim to
-`~/.codex/config.toml` inside the VM, so it can carry model settings, the
-approval policy, and MCP servers (configured as `[mcp_servers.<id>]` tables).
+At provision time the module writes a minimal reference `~/.codex/config.toml`
+inside the VM:
+
+```toml
+# Full-auto YOLO mode: no approval prompts, no sandbox.
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+```
+
+You can edit this file inside the VM at any time, or run `avm recreate <name>`
+to reprovision from scratch. To add MCP servers, add
+[`[mcp_servers.<id>]` tables](https://developers.openai.com/codex/config-reference)
+to that file.
 
 **Credentials** — to authenticate non-interactively, drop the auth file at
 `~/.config/agent-vm/modules/codex/auth.json` (the same JSON Codex writes when you
