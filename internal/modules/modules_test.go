@@ -7,7 +7,7 @@ import (
 )
 
 func TestEmbeddedScriptsPresent(t *testing.T) {
-	for _, m := range []string{"system", "base", "node", "dotnet", "go", "docker", "claude"} {
+	for _, m := range []string{"system", "base", "node", "dotnet", "go", "docker", "claude", "codex"} {
 		b, err := Script(m, "")
 		if err != nil {
 			t.Errorf("Script(%q): %v", m, err)
