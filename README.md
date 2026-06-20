@@ -87,6 +87,7 @@ resources:
 | `go` | Go toolchain (latest stable) |
 | `docker` | Docker CE |
 | `claude` | Claude Code CLI (needs `node`) |
+| `codex` | OpenAI Codex CLI (needs `node`) |
 
 The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed.
 
@@ -116,6 +117,25 @@ A bare `name` installs from the official marketplace
 `name@marketplace` targets another marketplace, which must already be registered.
 Plugins install at user scope into the VM user's `~/.claude`; one that fails to
 install logs a warning and provisioning continues.
+
+### Configuring the `codex` module
+
+The `codex` module installs the OpenAI Codex CLI (`npm install -g @openai/codex`)
+and, like `claude`, needs the `node` module installed first. It picks up two
+optional files from the host secrets directory (`~/.config/agent-vm/`, mounted
+read-only into the VM). Both are applied at provision time — edit them before
+`avm create`, or run `avm recreate <name>` to apply changes to an existing VM.
+
+**Config** — drop a [Codex config file](https://developers.openai.com/codex/config-reference)
+at `~/.config/agent-vm/modules/codex/config.toml`. It is copied verbatim to
+`~/.codex/config.toml` inside the VM, so it can carry model settings, the
+approval policy, and MCP servers (configured as `[mcp_servers.<id>]` tables).
+
+**Credentials** — to authenticate non-interactively, drop the auth file at
+`~/.config/agent-vm/modules/codex/auth.json` (the same JSON Codex writes when you
+run `codex login`). It is copied to `~/.codex/auth.json` inside the VM with `0600`
+permissions. Without it, sign in from inside the VM with `codex login`, or set
+`OPENAI_API_KEY`.
 
 ## How it works
 

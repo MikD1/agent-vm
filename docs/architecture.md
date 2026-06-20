@@ -185,7 +185,7 @@ sequenceDiagram
 
     loop each feature module in spec order
         CLI->>Guest: Phase 3 — module (sudo bash -s, env contract)
-        Note over Guest: e.g. node, dotnet, docker, claude
+        Note over Guest: e.g. node, dotnet, docker, claude, codex
     end
 
     alt workspace.mode == clone
@@ -229,7 +229,7 @@ graph TB
     end
 
     subgraph Modules["Phases 2-3 — modules"]
-        m["node / dotnet / docker / claude<br/><i>inherit trust transparently</i>"]
+        m["node / dotnet / docker / claude / codex<br/><i>inherit trust transparently</i>"]
     end
 
     baseimg -- "may already carry corp CAs" --> trust

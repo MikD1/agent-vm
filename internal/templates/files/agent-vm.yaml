@@ -4,6 +4,7 @@ modules:
   - go        # Go toolchain (latest stable)
   - docker    # Docker CE
   - claude    # Claude Code CLI (needs node)
+  # - codex   # OpenAI Codex CLI — alternative agent to claude (needs node)
 
 resources:
   cpus: 4
