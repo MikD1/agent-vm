@@ -27,7 +27,7 @@ func (f *fakeRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]b
 
 func TestNames(t *testing.T) {
 	f := &fakeRunner{stdout: map[string][]byte{
-		"list --format {{.Name}}": []byte("alpha\nbeta\n"),
+		"list --format {{.Name}}\t{{.Status}}": []byte("alpha\trunning\nbeta\tstopped\n"),
 	}}
 	c := New(f)
 	names, err := c.Names(context.Background())
@@ -36,6 +36,26 @@ func TestNames(t *testing.T) {
 	}
 	if len(names) != 2 || names[0] != "alpha" || names[1] != "beta" {
 		t.Errorf("names = %v", names)
+	}
+}
+
+func TestInstances(t *testing.T) {
+	f := &fakeRunner{stdout: map[string][]byte{
+		"list --format {{.Name}}\t{{.Status}}": []byte("alpha\tRunning\nbeta\tStopped\n"),
+	}}
+	c := New(f)
+	instances, err := c.Instances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 2 {
+		t.Fatalf("instances = %v", instances)
+	}
+	if instances[0].Name != "alpha" || instances[0].State != "running" {
+		t.Errorf("first instance = %+v", instances[0])
+	}
+	if instances[1].Name != "beta" || instances[1].State != "stopped" {
+		t.Errorf("second instance = %+v", instances[1])
 	}
 }
 

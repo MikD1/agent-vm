@@ -15,29 +15,37 @@ const (
 type Entry struct {
 	Name   string
 	Status Status
+	State  string
 	Record *Record
 }
 
-// Reconcile cross-references the registry against Lima's existing VM names.
+// Reconcile cross-references the registry against existing Lima VM names.
 func Reconcile(records []Record, limaNames []string) []Entry {
-	live := map[string]bool{}
+	states := map[string]string{}
 	for _, n := range limaNames {
-		live[n] = true
+		states[n] = "-"
 	}
+	return ReconcileStates(records, states)
+}
+
+// ReconcileStates cross-references the registry against existing Lima VMs keyed by name.
+func ReconcileStates(records []Record, limaStates map[string]string) []Entry {
 	known := map[string]bool{}
 	var out []Entry
 	for i := range records {
 		r := records[i]
 		known[r.Name] = true
 		st := StatusOrphaned
-		if live[r.Name] {
+		state := "-"
+		if liveState, ok := limaStates[r.Name]; ok {
 			st = StatusManaged
+			state = liveState
 		}
-		out = append(out, Entry{Name: r.Name, Status: st, Record: &records[i]})
+		out = append(out, Entry{Name: r.Name, Status: st, State: state, Record: &records[i]})
 	}
-	for _, n := range limaNames {
-		if !known[n] {
-			out = append(out, Entry{Name: n, Status: StatusUnmanaged})
+	for name, state := range limaStates {
+		if !known[name] {
+			out = append(out, Entry{Name: name, Status: StatusUnmanaged, State: state})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
