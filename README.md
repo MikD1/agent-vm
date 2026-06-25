@@ -59,7 +59,7 @@ With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
 | `avm create [path]` | Mount mode from a project dir. |
 | `avm create --repo=URL` | Clone mode (`--ref`, `--modules`, `--cpus`, `--memory`, `--disk`, `--base-image`). |
 | `avm recreate <name>` | Pristine rebuild from the record (clone mode re-clones — commit & push first). |
-| `avm list` | List VMs: managed / orphaned / unmanaged. |
+| `avm list` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state (running / stopped). |
 | `avm shell [name]` | Open a shell in the VM. |
 | `avm start/stop/restart [name]` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM and remove its record. `--force` skips confirmation. |
