@@ -275,7 +275,7 @@ stateDiagram-v2
     end note
 ```
 
-`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine); for **clone** mode this is a fresh re-clone from the remote, so anything not pushed is lost — "commit and push before recreate" is a required discipline, documented at the command. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched).
+`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine); for **clone** mode this is a fresh re-clone from the remote, so anything not pushed is lost — "commit and push before recreate" is a required discipline, documented at the command. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
 
 ## 8. Workspace Modes
 
@@ -316,7 +316,7 @@ There is no host mount of the project; the code is cloned inside the VM at `VM_W
 | `avm create` | Mount mode from the cwd Spec; write Record + create VM. |
 | `avm create --repo=URL [--modules=… --cpus=… --memory=… --disk=… --base-image=…]` | Clone mode; clone repo into the VM; honor in-repo Spec if present, flags override. |
 | `avm recreate <name>` | Pristine rebuild of the VM from its Record. |
-| `avm list` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged. |
+| `avm list` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged and show runtime state. |
 | `avm shell <name>` | Open a shell in the VM (defaults to the workspace dir). |
 | `avm start / stop / restart <name>` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM **and** remove its Record. |

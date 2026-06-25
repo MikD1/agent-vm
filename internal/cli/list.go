@@ -12,9 +12,9 @@ import (
 
 func formatList(entries []registry.Entry) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-24s %s\n", "NAME", "STATUS")
+	fmt.Fprintf(&b, "%-24s %-10s %s\n", "NAME", "STATUS", "STATE")
 	for _, e := range entries {
-		fmt.Fprintf(&b, "%-24s %s\n", e.Name, e.Status)
+		fmt.Fprintf(&b, "%-24s %-10s %s\n", e.Name, e.Status, e.State)
 	}
 	return b.String()
 }
@@ -24,11 +24,15 @@ func runList(ctx context.Context, c *lima.Client, store *registry.Store) (string
 	if err != nil {
 		return "", err
 	}
-	names, err := c.Names(ctx)
+	instances, err := c.Instances(ctx)
 	if err != nil {
 		return "", err
 	}
-	return formatList(registry.Reconcile(records, names)), nil
+	limaStates := make(map[string]string, len(instances))
+	for _, inst := range instances {
+		limaStates[inst.Name] = inst.State
+	}
+	return formatList(registry.ReconcileStates(records, limaStates)), nil
 }
 
 func newListCmd() *cobra.Command {

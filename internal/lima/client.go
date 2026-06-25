@@ -24,19 +24,51 @@ func (c *Client) run(ctx context.Context, stdin []byte, args ...string) ([]byte,
 	return out, nil
 }
 
-// Names lists existing Lima VM names.
-func (c *Client) Names(ctx context.Context) ([]string, error) {
-	out, err := c.run(ctx, nil, "list", "--format", "{{.Name}}")
+// Instance describes a Lima VM returned by `limactl list`.
+type Instance struct {
+	Name  string
+	State string
+}
+
+// Instances lists existing Lima VMs with their runtime state.
+func (c *Client) Instances(ctx context.Context) ([]Instance, error) {
+	out, err := c.run(ctx, nil, "list", "--format", "{{.Name}}\t{{.Status}}")
 	if err != nil {
 		return nil, err
 	}
-	var names []string
+	var instances []Instance
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line != "" {
-			names = append(names, line)
+		if line == "" {
+			continue
 		}
+		name, state, _ := strings.Cut(line, "\t")
+		if name == "" {
+			continue
+		}
+		instances = append(instances, Instance{Name: name, State: normalizeState(state)})
+	}
+	return instances, nil
+}
+
+// Names lists existing Lima VM names.
+func (c *Client) Names(ctx context.Context) ([]string, error) {
+	instances, err := c.Instances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(instances))
+	for _, inst := range instances {
+		names = append(names, inst.Name)
 	}
 	return names, nil
+}
+
+func normalizeState(state string) string {
+	state = strings.ToLower(strings.TrimSpace(state))
+	if state == "" {
+		return "-"
+	}
+	return state
 }
 
 // InfoRaw returns the raw JSON from `limactl info` for the caller to parse.
