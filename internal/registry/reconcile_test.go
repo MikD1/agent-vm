@@ -2,7 +2,7 @@ package registry
 
 import "testing"
 
-func TestReconcile(t *testing.T) {
+func TestReconcileStates(t *testing.T) {
 	records := []Record{{Name: "managed"}, {Name: "orphaned"}}
 	states := map[string]string{"managed": "running", "unmanaged": "stopped"}
 	entries := ReconcileStates(records, states)
