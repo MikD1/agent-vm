@@ -1,0 +1,53 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - run: make vet
+      - run: make test
+      - run: make build
+      - run: make shellcheck
+
+      - name: Build macOS archives
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+
+          for arch in arm64 amd64; do
+            package="avm_${version}_darwin_${arch}"
+            package_dir="dist/${package}"
+
+            mkdir -p "${package_dir}"
+            GOOS=darwin GOARCH="${arch}" go build -trimpath -ldflags="-s -w" -o "${package_dir}/avm" ./cmd/avm
+            cp README.md LICENSE "${package_dir}/"
+            tar -C "${package_dir}" -czf "dist/${package}.tar.gz" .
+          done
+
+          (
+            cd dist
+            sha256sum avm_*.tar.gz > checksums.txt
+          )
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/avm_*_darwin_*.tar.gz
+            dist/checksums.txt

@@ -70,7 +70,7 @@ Go is the language of the CLI orchestrator.
 | Module packaging | **`go:embed` for built-in modules + templates**, plus runtime discovery of an external module directory | A single self-contained binary for distribution, without losing extensibility for custom modules. |
 | Config parsing | **Native Go structs + `gopkg.in/yaml.v3`**, validation in Go | Type-safe, unit-testable validation; the only runtime dependency stays Lima. |
 | CLI framework | **cobra** | De-facto standard for subcommands, flags, and help. |
-| Distribution | Prebuilt binaries + Homebrew tap (and `go install`) | Single binary; Lima is the only external dependency. |
+| Distribution | GitHub Releases + `install.sh` (and `go install`) | Single binary; Lima is the only external dependency. The installer can install Lima through an existing Homebrew installation, but does not require a Homebrew tap for `avm`. |
 
 ### Go package structure
 

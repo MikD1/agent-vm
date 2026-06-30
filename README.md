@@ -4,21 +4,31 @@ Isolated Linux development VMs for AI-assisted work on macOS, one VM per project
 via [Lima](https://lima-vm.io/). Each VM carries only the tools its project selects.
 Driven by a single Go binary, `avm`.
 
-## Prerequisites
-
-```bash
-brew install lima
-```
-
 ## Install
 
 ```bash
-go install github.com/MikD1/agent-vm/cmd/avm@latest
+curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | sh
 ```
 
-From a local checkout:
+The installer supports macOS. It installs `avm` from the latest GitHub Release
+and checks for Lima, the only runtime dependency. If Lima is missing and
+Homebrew is already installed, the script runs `brew install lima`; if Homebrew
+is also missing, it exits with instructions for installing Homebrew or Lima
+manually. The installer does not install Homebrew itself.
+
+Set `AVM_INSTALL_DIR` to choose the install directory, or `AVM_VERSION` to pin a
+release tag:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | AVM_INSTALL_DIR=/usr/local/bin AVM_VERSION=v0.1.0 sh
+```
+
+### Install from source
+
+For development, or when you already have Go installed:
+
+```bash
+go install github.com/MikD1/agent-vm/cmd/avm@latest
 go install ./cmd/avm
 ```
 
