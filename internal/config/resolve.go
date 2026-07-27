@@ -38,13 +38,14 @@ type Env struct {
 // Resolved is the materialized config: everything needed to build both the Lima
 // template and the VM Record.
 type Resolved struct {
-	Name      string
-	Source    string // "cli" | "project"
-	Modules   []string
-	Resources Resources
-	Base      Base
-	User      string
-	Workspace Workspace
+	Name        string
+	Source      string // "cli" | "project"
+	Modules     []string
+	Resources   Resources
+	Base        Base
+	User        string
+	Workspace   Workspace
+	ExtraMounts []ExtraMount
 }
 
 // Validate checks a Spec in isolation. known reports whether a module name exists.
@@ -110,6 +111,7 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	} else {
 		r.Workspace = Workspace{Mode: ModeMount, GuestPath: guestPath, HostPath: env.HostPath}
 	}
+	r.ExtraMounts = spec.ExtraMounts
 	return r, nil
 }
 
