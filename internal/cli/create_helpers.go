@@ -64,3 +64,37 @@ func loadSpecForCreate(f config.Flags, dir string) (config.Spec, bool, string, e
 func errSpecRequired(dir string) error {
 	return fmt.Errorf(".agent-vm.yaml not found in %s (run: avm init)", dir)
 }
+
+// resolveMountInputs turns Spec mounts (paths relative to specDir) and --mount
+// flags (relative to cwd) into absolute, existence-checked MountInputs. This is
+// where the filesystem is touched, keeping the config package pure.
+func resolveMountInputs(specMounts []config.MountSpec, flagMounts []string, specDir, cwd string) ([]config.MountInput, error) {
+	var out []config.MountInput
+	add := func(rawPath, base, name string) error {
+		abs := rawPath
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(base, abs)
+		}
+		abs = filepath.Clean(abs)
+		fi, err := os.Stat(abs)
+		if err != nil {
+			return fmt.Errorf("mount source not found: %s", abs)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("mount source is not a directory: %s", abs)
+		}
+		out = append(out, config.MountInput{HostPath: abs, Name: name})
+		return nil
+	}
+	for _, m := range specMounts {
+		if err := add(m.Path, specDir, m.Name); err != nil {
+			return nil, err
+		}
+	}
+	for _, p := range flagMounts {
+		if err := add(p, cwd, ""); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}

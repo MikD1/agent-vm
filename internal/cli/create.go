@@ -71,6 +71,7 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 
 func newCreateCmd() *cobra.Command {
 	var f config.Flags
+	var mountFlags []string
 	cmd := &cobra.Command{
 		Use:   "create [path]",
 		Short: "Create and start a VM (mount mode; --repo for clone mode)",
@@ -79,10 +80,11 @@ func newCreateCmd() *cobra.Command {
 			ctx := cmd.Context()
 			f.ModulesSet = cmd.Flags().Changed("modules")
 
-			absDir, err := os.Getwd()
+			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
+			absDir := cwd
 			if len(args) == 1 {
 				absDir, err = filepath.Abs(args[0])
 				if err != nil {
@@ -121,12 +123,18 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
+			mountInputs, err := resolveMountInputs(spec.Mounts, mountFlags, absDir, cwd)
+			if err != nil {
+				return err
+			}
+
 			env := config.Env{
 				ProjectName: projName,
 				GuestUser:   user,
 				GuestHome:   home,
 				HostPath:    hostPath,
 				SpecPresent: specPresent,
+				Mounts:      mountInputs,
 			}
 			resolved, err := config.Resolve(f, spec, env)
 			if err != nil {
@@ -151,5 +159,6 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.BaseImage, "base-image", "", "override base image")
 	cmd.Flags().StringVar(&f.Repo, "repo", "", "clone mode: git repo URL")
 	cmd.Flags().StringVar(&f.Ref, "ref", "", "clone mode: git ref (default main)")
+	cmd.Flags().StringArrayVar(&mountFlags, "mount", nil, "additional host folder to mount (repeatable)")
 	return cmd
 }

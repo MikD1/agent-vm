@@ -43,3 +43,15 @@ func TestRecreateMissingRecord(t *testing.T) {
 		t.Error("want error recreating a VM with no record")
 	}
 }
+
+func TestRecordToResolvedCarriesMounts(t *testing.T) {
+	rec := registry.Record{
+		Name: "my-api", User: "me",
+		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Mounts:    []config.Mount{{HostPath: "/h/shared", GuestPath: "/home/me/shared"}},
+	}
+	r := recordToResolved(rec)
+	if len(r.Mounts) != 1 || r.Mounts[0].GuestPath != "/home/me/shared" {
+		t.Errorf("recordToResolved dropped mounts: %+v", r.Mounts)
+	}
+}

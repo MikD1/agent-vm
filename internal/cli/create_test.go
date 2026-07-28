@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -68,3 +70,39 @@ func TestCreateRefusesExistingRecord(t *testing.T) {
 }
 
 func nowFixed() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+
+func TestResolveMountInputs(t *testing.T) {
+	specDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(specDir, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cwd, "tool"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveMountInputs(
+		[]config.MountSpec{{Path: "lib", Name: "shared"}},
+		[]string{filepath.Join(cwd, "tool")},
+		specDir, cwd,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 inputs, got %d (%+v)", len(got), got)
+	}
+	if got[0].HostPath != filepath.Join(specDir, "lib") || got[0].Name != "shared" {
+		t.Errorf("spec mount resolved wrong: %+v", got[0])
+	}
+	if got[1].HostPath != filepath.Join(cwd, "tool") {
+		t.Errorf("flag mount resolved wrong: %+v", got[1])
+	}
+}
+
+func TestResolveMountInputsMissing(t *testing.T) {
+	specDir := t.TempDir()
+	if _, err := resolveMountInputs([]config.MountSpec{{Path: "nope"}}, nil, specDir, specDir); err == nil {
+		t.Error("want error for a missing mount source")
+	}
+}
