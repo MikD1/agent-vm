@@ -18,6 +18,7 @@ type Record struct {
 	Resources config.Resources `yaml:"resources"`
 	User      string           `yaml:"user"`
 	Workspace config.Workspace `yaml:"workspace"`
+	Mounts    []config.Mount   `yaml:"mounts,omitempty"`
 }
 
 // FromResolved builds a Record from a Resolved config, stamping createdAt.
@@ -31,5 +32,6 @@ func FromResolved(r config.Resolved, createdAt time.Time) Record {
 		Resources: r.Resources,
 		User:      r.User,
 		Workspace: r.Workspace,
+		Mounts:    r.Mounts,
 	}
 }

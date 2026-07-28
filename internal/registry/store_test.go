@@ -64,3 +64,21 @@ func TestReadMissing(t *testing.T) {
 		t.Error("want error reading missing record")
 	}
 }
+
+func TestStoreRoundTripMounts(t *testing.T) {
+	s := NewStore(t.TempDir())
+	rec := sampleRecord()
+	rec.Mounts = []config.Mount{
+		{HostPath: "/Users/me/shared-lib", GuestPath: "/home/me.linux/shared-lib"},
+	}
+	if err := s.Write(rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Read("my-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Mounts) != 1 || got.Mounts[0].GuestPath != "/home/me.linux/shared-lib" {
+		t.Errorf("mounts round-trip mismatch: %+v", got.Mounts)
+	}
+}
