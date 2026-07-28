@@ -22,6 +22,28 @@ type Base struct {
 	Image string `yaml:"image,omitempty"`
 }
 
+// MountSpec is one additional host folder in the Project Spec. It accepts either
+// a bare string (the path) or a mapping {path, name}. Paths are relative to the
+// spec file (or absolute); name overrides the guest directory name.
+type MountSpec struct {
+	Path string `yaml:"path"`
+	Name string `yaml:"name,omitempty"`
+}
+
+// UnmarshalYAML lets a mount be written as a scalar path or a {path, name} map.
+func (m *MountSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		return node.Decode(&m.Path)
+	}
+	type raw MountSpec // avoid recursing into this UnmarshalYAML
+	var r raw
+	if err := node.Decode(&r); err != nil {
+		return err
+	}
+	*m = MountSpec(r)
+	return nil
+}
+
 // Workspace is the RESOLVED workspace (mode + paths). It lives in config so the
 // registry can reuse it; the Project Spec itself carries no workspace.
 type Workspace struct {
@@ -36,9 +58,10 @@ type Workspace struct {
 // so an absent key (nil → defaults may apply) is distinguishable from an explicit
 // empty list (base only).
 type Spec struct {
-	Modules   *[]string `yaml:"modules,omitempty"`
-	Resources Resources `yaml:"resources,omitempty"`
-	Base      Base      `yaml:"base,omitempty"`
+	Modules   *[]string   `yaml:"modules,omitempty"`
+	Resources Resources   `yaml:"resources,omitempty"`
+	Base      Base        `yaml:"base,omitempty"`
+	Mounts    []MountSpec `yaml:"mounts,omitempty"`
 }
 
 // Load parses a .agent-vm.yaml file into a Spec.
