@@ -32,13 +32,22 @@ type Workspace struct {
 	Ref       string `yaml:"ref,omitempty"`      // clone mode
 }
 
+// ExtraMount is an additional host directory to mount in the guest.
+// GuestPath defaults to ~/basename(HostPath) when empty.
+type ExtraMount struct {
+	HostPath  string `yaml:"hostPath"`
+	GuestPath string `yaml:"guestPath,omitempty"`
+	Writable  bool   `yaml:"writable,omitempty"`
+}
+
 // Spec is the human-authored Project Spec (.agent-vm.yaml). Modules is a pointer
 // so an absent key (nil → defaults may apply) is distinguishable from an explicit
 // empty list (base only).
 type Spec struct {
-	Modules   *[]string `yaml:"modules,omitempty"`
-	Resources Resources `yaml:"resources,omitempty"`
-	Base      Base      `yaml:"base,omitempty"`
+	Modules     *[]string    `yaml:"modules,omitempty"`
+	Resources   Resources    `yaml:"resources,omitempty"`
+	Base        Base         `yaml:"base,omitempty"`
+	ExtraMounts []ExtraMount `yaml:"extraMounts,omitempty"`
 }
 
 // Load parses a .agent-vm.yaml file into a Spec.

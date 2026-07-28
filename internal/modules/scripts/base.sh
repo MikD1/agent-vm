@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Phase 2 — base module. Always installed first among modules.
-# Contract: VM_USER, VM_PROJECT, VM_WORKSPACE, VM_SECRETS.
+# Contract: VM_USER, VM_PROJECT, VM_WORKSPACE, VM_HOST_WORKSPACE, VM_SECRETS.
 # Certificates are NOT handled here — the Phase 1 system layer already configured
 # trust globally before this runs.
 

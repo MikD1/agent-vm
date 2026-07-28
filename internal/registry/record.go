@@ -10,26 +10,28 @@ import (
 
 // Record is the host-local materialization of a Project Spec for one Lima VM.
 type Record struct {
-	Name      string           `yaml:"name"`
-	Source    string           `yaml:"source"` // "cli" | "project"
-	CreatedAt time.Time        `yaml:"createdAt"`
-	Base      config.Base      `yaml:"base"`
-	Modules   []string         `yaml:"modules"`
-	Resources config.Resources `yaml:"resources"`
-	User      string           `yaml:"user"`
-	Workspace config.Workspace `yaml:"workspace"`
+	Name        string              `yaml:"name"`
+	Source      string              `yaml:"source"` // "cli" | "project"
+	CreatedAt   time.Time           `yaml:"createdAt"`
+	Base        config.Base         `yaml:"base"`
+	Modules     []string            `yaml:"modules"`
+	Resources   config.Resources    `yaml:"resources"`
+	User        string              `yaml:"user"`
+	Workspace   config.Workspace    `yaml:"workspace"`
+	ExtraMounts []config.ExtraMount `yaml:"extraMounts,omitempty"`
 }
 
 // FromResolved builds a Record from a Resolved config, stamping createdAt.
 func FromResolved(r config.Resolved, createdAt time.Time) Record {
 	return Record{
-		Name:      r.Name,
-		Source:    r.Source,
-		CreatedAt: createdAt,
-		Base:      r.Base,
-		Modules:   r.Modules,
-		Resources: r.Resources,
-		User:      r.User,
-		Workspace: r.Workspace,
+		Name:        r.Name,
+		Source:      r.Source,
+		CreatedAt:   createdAt,
+		Base:        r.Base,
+		Modules:     r.Modules,
+		Resources:   r.Resources,
+		User:        r.User,
+		Workspace:   r.Workspace,
+		ExtraMounts: r.ExtraMounts,
 	}
 }

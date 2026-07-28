@@ -117,6 +117,21 @@ exec bash -euo pipefail -s`
 	return err
 }
 
+// VMDir returns the directory where Lima stores config and state for a named VM.
+func (c *Client) VMDir(ctx context.Context, name string) (string, error) {
+	out, err := c.run(ctx, nil, "list", "--format", "{{.Name}}\t{{.Dir}}")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		n, dir, ok := strings.Cut(line, "\t")
+		if ok && n == name {
+			return strings.TrimSpace(dir), nil
+		}
+	}
+	return "", fmt.Errorf("VM %q not found", name)
+}
+
 // Shell runs an interactive shell in the VM at workdir (empty workdir = default).
 // It connects the process stdio directly (not via CommandRunner, which buffers).
 func (c *Client) Shell(ctx context.Context, name, workdir string, extra ...string) error {

@@ -28,8 +28,15 @@ curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | AV
 For development, or when you already have Go installed:
 
 ```bash
+git clone https://github.com/MikD1/agent-vm
+cd agent-vm
+make install          # builds avm + copies local/modules.d/*.sh → ~/.config/agent-vm/modules.d/
+```
+
+Or install the binary only:
+
+```bash
 go install github.com/MikD1/agent-vm/cmd/avm@latest
-go install ./cmd/avm
 ```
 
 ## Usage
@@ -72,6 +79,7 @@ With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
 | `avm list` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state (running / stopped). |
 | `avm shell [name]` | Open a shell in the VM. |
 | `avm start/stop/restart [name]` | Lifecycle controls. |
+| `avm mount <path> [<vm>]` | Add a host directory mount to an existing VM (stops, edits Lima config, starts). `--guest-path`, `--writable`. |
 | `avm delete <name>` | Stop + delete the VM and remove its record. `--force` skips confirmation. |
 | `avm prune [name]` | Remove orphaned records (record without a VM). |
 
@@ -92,7 +100,26 @@ resources:
   memory: 16GiB  # default 4GiB
   disk: 200GiB   # default 120GiB
 # base: { image: corp-ubuntu }   # optional; default template:_images/ubuntu
+
+# Extra host directories to mount in addition to the project workspace.
+# guestPath defaults to ~/basename(hostPath) when omitted.
+extraMounts:
+  - hostPath: ~/projects/shared-lib   # read-only at ~/shared-lib
+  - hostPath: ~/projects/tools
+    guestPath: /opt/tools
+    writable: true
 ```
+
+Extra mounts are applied at `avm create` / `avm recreate` time. To add a mount to
+an already-running VM without recreating it, use `avm mount`:
+
+```bash
+avm mount ~/projects/shared-lib               # adds to VM named after cwd
+avm mount ~/projects/tools my-api --writable  # explicit VM name + writable
+```
+
+`avm mount` stops the VM, edits its Lima config, starts it again, and persists the
+mount in the registry so `avm recreate` re-applies it.
 
 ## Modules
 
@@ -158,6 +185,29 @@ to that file.
 run `codex login`). It is copied to `~/.codex/auth.json` inside the VM with `0600`
 permissions. Without it, sign in from inside the VM with `codex login`, or set
 `OPENAI_API_KEY`.
+
+### Custom modules
+
+You can add your own module scripts without forking or modifying the binary. Drop
+a `<name>.sh` file into `~/.config/agent-vm/modules.d/`; it overrides the
+built-in module of the same name, or registers a new one if no built-in exists.
+
+If you cloned this repo, the idiomatic place for personal modules is
+`local/modules.d/` (already in `.gitignore`). Running `make install` builds `avm`
+and copies every `local/modules.d/*.sh` to `~/.config/agent-vm/modules.d/`
+automatically, so your modules are always in sync after a rebuild.
+
+```bash
+local/
+  modules.d/
+    dp.sh      # installs a corporate CLI tool
+    serena.sh  # installs a language-aware assistant
+```
+
+Custom module scripts run under the same env contract as built-in ones (`VM_USER`,
+`VM_PROJECT`, `VM_WORKSPACE`, `VM_SECRETS`). Any secrets or config files the
+script needs can be placed under `~/.config/agent-vm/modules/<name>/` and
+read via `$VM_SECRETS/modules/<name>/`.
 
 ## How it works
 

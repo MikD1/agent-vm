@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"path/filepath"
+
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/templates"
 	"gopkg.in/yaml.v3"
@@ -26,6 +28,17 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 			"location":   r.Workspace.HostPath,
 			"mountPoint": r.Workspace.GuestPath,
 			"writable":   true,
+		})
+	}
+	for _, m := range r.ExtraMounts {
+		gp := m.GuestPath
+		if gp == "" {
+			gp = guestHome + "/" + filepath.Base(m.HostPath)
+		}
+		mounts = append(mounts, map[string]any{
+			"location":   m.HostPath,
+			"mountPoint": gp,
+			"writable":   m.Writable,
 		})
 	}
 	doc["mounts"] = mounts
