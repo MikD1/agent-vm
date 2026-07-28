@@ -12,9 +12,13 @@ import (
 
 func formatList(entries []registry.Entry) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%-24s %-10s %s\n", "NAME", "STATUS", "STATE")
+	fmt.Fprintf(&b, "%-24s %-10s %-10s %s\n", "NAME", "STATUS", "STATE", "MOUNTS")
 	for _, e := range entries {
-		fmt.Fprintf(&b, "%-24s %-10s %s\n", e.Name, e.Status, e.State)
+		mounts := "-"
+		if e.Record != nil && len(e.Record.Mounts) > 0 {
+			mounts = fmt.Sprintf("+%d", len(e.Record.Mounts))
+		}
+		fmt.Fprintf(&b, "%-24s %-10s %-10s %s\n", e.Name, e.Status, e.State, mounts)
 	}
 	return b.String()
 }
