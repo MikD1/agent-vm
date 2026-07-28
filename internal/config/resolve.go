@@ -25,6 +25,20 @@ type Flags struct {
 	Ref        string
 }
 
+// Mount is a resolved additional mount: absolute host + guest paths (materialization).
+type Mount struct {
+	HostPath  string `yaml:"hostPath"`
+	GuestPath string `yaml:"guestPath"`
+}
+
+// MountInput is an already-resolved (absolute) additional host folder fed into
+// Resolve via Env. The CLI layer does relative-path resolution and existence
+// checks, keeping config free of filesystem access.
+type MountInput struct {
+	HostPath string
+	Name     string
+}
+
 // Env carries facts resolved outside config: the normalized project/VM name, the
 // guest user/home (from `limactl info`), and—for mount mode—the host project path.
 // SpecPresent records whether a spec file was found (→ source "project").
@@ -34,6 +48,7 @@ type Env struct {
 	GuestHome   string
 	HostPath    string
 	SpecPresent bool
+	Mounts      []MountInput
 }
 
 // Resolved is the materialized config: everything needed to build both the Lima
@@ -46,6 +61,7 @@ type Resolved struct {
 	Base      Base
 	User      string
 	Workspace Workspace
+	Mounts    []Mount
 }
 
 // Validate checks a Spec in isolation. known reports whether a module name exists.
@@ -121,6 +137,11 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	} else {
 		r.Workspace = Workspace{Mode: ModeMount, GuestPath: guestPath, HostPath: env.HostPath}
 	}
+	mounts, err := resolveMounts(env.Mounts, env.GuestHome, r.Workspace.GuestPath)
+	if err != nil {
+		return Resolved{}, err
+	}
+	r.Mounts = mounts
 	return r, nil
 }
 
@@ -140,4 +161,30 @@ func firstStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// resolveMounts computes each additional mount's guest path (~/<name>), dedupes
+// identical host paths, and rejects guest-path collisions — including a clash
+// with the primary workspace.
+func resolveMounts(inputs []MountInput, guestHome, primaryGuest string) ([]Mount, error) {
+	var out []Mount
+	seenHost := map[string]bool{}
+	owner := map[string]string{primaryGuest: "the primary workspace"}
+	for _, in := range inputs {
+		if seenHost[in.HostPath] {
+			continue
+		}
+		seenHost[in.HostPath] = true
+		name := in.Name
+		if name == "" {
+			name = path.Base(in.HostPath)
+		}
+		guest := path.Join(guestHome, name)
+		if prev, clash := owner[guest]; clash {
+			return nil, fmt.Errorf("mount conflict: %q and %s both map to %s; set an explicit name:", in.HostPath, prev, guest)
+		}
+		owner[guest] = fmt.Sprintf("%q", in.HostPath)
+		out = append(out, Mount{HostPath: in.HostPath, GuestPath: guest})
+	}
+	return out, nil
 }

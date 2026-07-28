@@ -88,3 +88,48 @@ func TestValidateMounts(t *testing.T) {
 		t.Errorf("unexpected error for valid mounts: %v", err)
 	}
 }
+
+func TestResolveMounts(t *testing.T) {
+	env := Env{
+		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux",
+		HostPath: "/Users/me/my-api",
+		Mounts: []MountInput{
+			{HostPath: "/Users/me/shared-lib"},                 // → ~/shared-lib
+			{HostPath: "/Users/me/tools/cli", Name: "cli-x"},   // name override → ~/cli-x
+			{HostPath: "/Users/me/shared-lib"},                 // duplicate host → deduped
+		},
+	}
+	r, err := Resolve(Flags{}, Spec{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Mounts) != 2 {
+		t.Fatalf("want 2 mounts after dedupe, got %d (%+v)", len(r.Mounts), r.Mounts)
+	}
+	if r.Mounts[0].HostPath != "/Users/me/shared-lib" || r.Mounts[0].GuestPath != "/home/me.linux/shared-lib" {
+		t.Errorf("mount[0] = %+v", r.Mounts[0])
+	}
+	if r.Mounts[1].GuestPath != "/home/me.linux/cli-x" {
+		t.Errorf("mount[1] guest = %q (name override)", r.Mounts[1].GuestPath)
+	}
+}
+
+func TestResolveMountCollisionWithSibling(t *testing.T) {
+	env := Env{
+		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api",
+		Mounts: []MountInput{{HostPath: "/a/shared"}, {HostPath: "/b/shared"}}, // both → ~/shared
+	}
+	if _, err := Resolve(Flags{}, Spec{}, env); err == nil {
+		t.Error("want collision error for two mounts mapping to the same guest path")
+	}
+}
+
+func TestResolveMountCollisionWithPrimary(t *testing.T) {
+	env := Env{
+		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api",
+		Mounts: []MountInput{{HostPath: "/elsewhere/my-api"}}, // basename my-api → clashes with primary
+	}
+	if _, err := Resolve(Flags{}, Spec{}, env); err == nil {
+		t.Error("want collision error against the primary workspace")
+	}
+}
