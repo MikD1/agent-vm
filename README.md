@@ -61,6 +61,26 @@ avm shell my-api
 With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
 (`node`, `claude`) is installed.
 
+### Additional mounts — projects spanning multiple folders
+
+Beyond the primary project directory, a VM can mount extra host folders —
+useful when a project spans a main repo plus sibling libraries, utilities, or
+tools. Declare them in `.agent-vm.yaml` (paths relative to the file, see
+[Project config](#project-config--agent-vmyaml)) and/or pass `--mount PATH`
+(repeatable) at `avm create` time; flags add to the spec list, they don't
+replace it:
+
+```bash
+avm create --mount ../shared-lib --mount ../tools/cli
+```
+
+Each folder mounts read/write at `~/<basename>` in the guest, or at `~/<name>`
+if you set an explicit `name:` in the spec to resolve a basename collision.
+This works with either primary workspace mode (mount or clone). Additional
+mounts are always writable, need no provisioning of their own — Lima mounts
+everything at VM start — and are stored in the VM Record, so `avm recreate`
+reproduces them automatically without passing `--mount` again.
+
 ## Commands
 
 | Command | Description |
