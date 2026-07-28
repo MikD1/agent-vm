@@ -28,6 +28,13 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 			"writable":   true,
 		})
 	}
+	for _, m := range r.Mounts {
+		mounts = append(mounts, map[string]any{
+			"location":   m.HostPath,
+			"mountPoint": m.GuestPath,
+			"writable":   true,
+		})
+	}
 	doc["mounts"] = mounts
 
 	ssh, _ := doc["ssh"].(map[string]any)

@@ -42,3 +42,26 @@ func TestBuildLimaConfigCloneForwardsAgent(t *testing.T) {
 		t.Error("clone mode must not add a host project mount")
 	}
 }
+
+func TestBuildLimaConfigAdditionalMounts(t *testing.T) {
+	r := config.Resolved{
+		Name: "my-api", User: "me",
+		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
+		Base:      config.Base{Image: "template:_images/ubuntu"},
+		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Mounts: []config.Mount{
+			{HostPath: "/h/shared-lib", GuestPath: "/home/me/shared-lib"},
+			{HostPath: "/h/tools/cli", GuestPath: "/home/me/cli"},
+		},
+	}
+	yamlOut, err := buildLimaConfig(r, "/home/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(yamlOut)
+	for _, want := range []string{"/h/shared-lib", "/home/me/shared-lib", "/h/tools/cli", "/home/me/cli", "/h/my-api"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("lima config missing %q:\n%s", want, s)
+		}
+	}
+}
