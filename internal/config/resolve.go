@@ -181,7 +181,7 @@ func resolveMounts(inputs []MountInput, guestHome, primaryGuest string) ([]Mount
 		}
 		guest := path.Join(guestHome, name)
 		if prev, clash := owner[guest]; clash {
-			return nil, fmt.Errorf("mount conflict: %q and %s both map to %s; set an explicit name:", in.HostPath, prev, guest)
+			return nil, fmt.Errorf("mount conflict: %q and %s both map to %s; set an explicit name on one of them", in.HostPath, prev, guest)
 		}
 		owner[guest] = fmt.Sprintf("%q", in.HostPath)
 		out = append(out, Mount{HostPath: in.HostPath, GuestPath: guest})
