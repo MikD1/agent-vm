@@ -7,8 +7,9 @@ import (
 )
 
 var (
-	sizeRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
-	modRe  = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	sizeRe      = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
+	modRe       = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+	mountNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 )
 
 // Flags are the create/init command-line overrides. ModulesSet records whether
@@ -67,6 +68,16 @@ func (s Spec) Validate(known func(string) bool) error {
 	}
 	if s.Resources.Disk != "" && !sizeRe.MatchString(s.Resources.Disk) {
 		return fmt.Errorf("invalid disk %q (want a size like 120GiB)", s.Resources.Disk)
+	}
+	for _, m := range s.Mounts {
+		if m.Path == "" {
+			return fmt.Errorf("mount entry has empty path")
+		}
+		if m.Name != "" {
+			if m.Name == "." || m.Name == ".." || !mountNameRe.MatchString(m.Name) {
+				return fmt.Errorf("invalid mount name %q (use a single path segment)", m.Name)
+			}
+		}
 	}
 	return nil
 }

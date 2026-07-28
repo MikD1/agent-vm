@@ -72,3 +72,19 @@ func TestValidate(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestValidateMounts(t *testing.T) {
+	known := func(string) bool { return true }
+	if err := (Spec{Mounts: []MountSpec{{Path: ""}}}).Validate(known); err == nil {
+		t.Error("want error for empty mount path")
+	}
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: "bad/name"}}}).Validate(known); err == nil {
+		t.Error("want error for name with a slash")
+	}
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: ".."}}}).Validate(known); err == nil {
+		t.Error("want error for name '..'")
+	}
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x"}, {Path: "../y", Name: "ok-1"}}}).Validate(known); err != nil {
+		t.Errorf("unexpected error for valid mounts: %v", err)
+	}
+}
