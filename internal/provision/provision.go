@@ -25,10 +25,11 @@ func New(c *lima.Client, externalDir string) *Provisioner {
 
 func (p *Provisioner) env(r config.Resolved) map[string]string {
 	return map[string]string{
-		"VM_USER":      r.User,
-		"VM_PROJECT":   r.Name,
-		"VM_WORKSPACE": r.Workspace.GuestPath,
-		"VM_SECRETS":   "/mnt/host/agent-vm",
+		"VM_USER":           r.User,
+		"VM_PROJECT":        r.Name,
+		"VM_WORKSPACE":      r.Workspace.GuestPath,
+		"VM_HOST_WORKSPACE": r.Workspace.HostPath,
+		"VM_SECRETS":        "/mnt/host/agent-vm",
 	}
 }
 
