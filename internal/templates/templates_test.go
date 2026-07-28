@@ -16,3 +16,9 @@ func TestEmbeddedTemplatesPresent(t *testing.T) {
 		t.Error("spec template must list modules")
 	}
 }
+
+func TestSpecTemplateDocumentsMounts(t *testing.T) {
+	if !strings.Contains(string(SpecTemplate), "mounts:") {
+		t.Error("spec template should show a mounts example")
+	}
+}

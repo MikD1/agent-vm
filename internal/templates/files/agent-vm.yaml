@@ -10,3 +10,11 @@ resources:
   cpus: 4
   memory: 4GiB
   disk: 120GiB
+
+# Additional host folders to mount alongside the project (paths relative to this
+# file). Each is mounted read/write at ~/<basename> inside the VM. Use the
+# object form with `name:` to override the guest directory name on a collision.
+# mounts:
+#   - ../shared-lib
+#   - path: ../tools/cli
+#     name: cli-tools
