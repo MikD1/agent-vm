@@ -66,7 +66,7 @@ With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
 | Command | Description |
 |---------|-------------|
 | `avm init [path]` | Write a `.agent-vm.yaml` template. `--force` overwrites. |
-| `avm create [path]` | Mount mode from a project dir. |
+| `avm create [path]` | Mount mode from a project dir. Add --mount PATH (repeatable) to mount extra host folders. |
 | `avm create --repo=URL` | Clone mode (`--ref`, `--modules`, `--cpus`, `--memory`, `--disk`, `--base-image`). |
 | `avm recreate <name>` | Pristine rebuild from the record (clone mode re-clones — commit & push first). |
 | `avm list` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state (running / stopped). |
@@ -92,6 +92,8 @@ resources:
   memory: 16GiB  # default 4GiB
   disk: 200GiB   # default 120GiB
 # base: { image: corp-ubuntu }   # optional; default template:_images/ubuntu
+mounts:              # optional: extra host folders, relative to this file
+  - ../shared-lib    #   → mounted read/write at ~/shared-lib
 ```
 
 ## Modules

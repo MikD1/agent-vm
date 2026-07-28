@@ -308,6 +308,8 @@ The host project directory is virtiofs-mounted into the guest, writable. Config 
 
 There is no host mount of the project; the code is cloned inside the VM at `VM_WORKSPACE`. Git access uses **SSH agent forwarding, enabled only for clone-mode VMs** (not globally): the host SSH agent socket is forwarded, keys never leave the host, and the VM authenticates to the git host through the forwarded agent for the initial clone and for subsequent push/pull from within the VM. The VM Record is the only durable description of the VM (no in-repo file on the host), which is exactly why the registry exists.
 
+**Additional mounts.** Beyond the primary workspace, a VM may mount extra host folders declared in the Spec (`mounts:`, relative paths — portable intent) or via repeatable `--mount` flags. Each resolves to an absolute host path and a guest mount point `~/<name>` recorded in the VM Record (materialization). They are always writable and need no provisioning — Lima mounts them at start. Mode stays keyed to the primary; additional folders are mount-only in this iteration.
+
 ## 9. Command Surface
 
 | Command | Behavior |
