@@ -23,11 +23,18 @@ http_status() {
   curl -sSI -o /dev/null -w '%{http_code}\n' "$1" 2>/dev/null || printf '000\n'
 }
 
-require_macos() {
-  os_name=$(uname -s)
-  if [ "$os_name" != "Darwin" ]; then
-    die "install.sh supports macOS only"
-  fi
+host_os() {
+  case "$(uname -s)" in
+    Darwin)
+      printf "darwin\n"
+      ;;
+    Linux)
+      printf "linux\n"
+      ;;
+    *)
+      die "install.sh supports macOS and Linux only"
+      ;;
+  esac
 }
 
 detect_arch() {
@@ -40,20 +47,25 @@ detect_arch() {
       printf 'amd64\n'
       ;;
     *)
-      die "unsupported macOS architecture: ${machine}"
+      die "unsupported architecture: ${machine}"
       ;;
   esac
 }
 
 ensure_lima() {
+  host=$1
   if command -v limactl >/dev/null 2>&1; then
     return
   fi
 
-  if command -v brew >/dev/null 2>&1; then
+  if [ "$host" = "darwin" ] && command -v brew >/dev/null 2>&1; then
     info "Lima not found; installing Lima with Homebrew..."
     brew install lima
     return
+  fi
+
+  if [ "$host" = "linux" ]; then
+    die "Lima is required. Install Lima and QEMU with KVM access, then rerun this script. See https://lima-vm.io/."
   fi
 
   die "Lima is required. Install Homebrew from https://brew.sh and rerun this script, or install Lima manually from https://lima-vm.io/."
@@ -120,12 +132,13 @@ install_dir() {
 }
 
 download_and_install() {
-  arch=$1
-  version=$2
-  target_dir=$3
+  host=$1
+  arch=$2
+  version=$3
+  target_dir=$4
 
   version_name=${version#v}
-  archive="avm_${version_name}_darwin_${arch}.tar.gz"
+  archive="avm_${version_name}_${host}_${arch}.tar.gz"
   tmpdir=$(mktemp -d)
   trap 'rm -rf "$tmpdir"' 0 HUP INT TERM
 
@@ -172,14 +185,14 @@ path_hint() {
 }
 
 main() {
-  require_macos
-  ensure_lima
+  host=$(host_os)
+  ensure_lima "$host"
 
   arch=$(detect_arch)
   version=$(resolve_version)
   target_dir=$(install_dir)
 
-  download_and_install "$arch" "$version" "$target_dir"
+  download_and_install "$host" "$arch" "$version" "$target_dir"
   info "Installed avm to ${target_dir}/avm"
   path_hint "$target_dir"
 }
