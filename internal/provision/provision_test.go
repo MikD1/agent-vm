@@ -2,6 +2,8 @@ package provision
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -114,6 +116,42 @@ func TestPlanSkipsEmptyFilesPhase(t *testing.T) {
 	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
 	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("ops = %v, want %v", got, want)
+	}
+}
+
+func TestPlanScriptsPhase(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.sh")
+	second := filepath.Join(dir, "second.sh")
+	if err := os.WriteFile(first, []byte("#!/usr/bin/env bash\necho first\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("#!/usr/bin/env bash\necho second\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	r := mountResolved()
+	r.Scripts = []string{first, second}
+	p := New(lima.New(rec), false)
+	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(rec.stdin, "\n---\n")
+	if !strings.Contains(joined, "echo first") || !strings.Contains(joined, "echo second") {
+		t.Errorf("scripts did not run; stdin was %#v", rec.stdin)
+	}
+	if strings.Index(joined, "echo first") > strings.Index(joined, "echo second") {
+		t.Error("scripts ran out of spec order")
+	}
+}
+
+func TestPlanScriptsPhaseMissingFile(t *testing.T) {
+	rec := &recorder{}
+	r := mountResolved()
+	r.Scripts = []string{filepath.Join(t.TempDir(), "gone.sh")}
+	p := New(lima.New(rec), false)
+	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err == nil {
+		t.Error("missing script = nil error, want an error")
 	}
 }
 

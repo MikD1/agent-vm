@@ -210,6 +210,34 @@ func TestResolveFiles(t *testing.T) {
 	}
 }
 
+func TestValidateScripts(t *testing.T) {
+	if err := (Spec{Scripts: []string{"provision/docker.sh"}}).Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil", err)
+	}
+	for name, s := range map[string]Spec{
+		"empty":  {Scripts: []string{""}},
+		"dotdot": {Scripts: []string{"../evil.sh"}},
+	} {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%s) = nil, want an error", name)
+		}
+	}
+}
+
+func TestResolvePreservesScriptOrder(t *testing.T) {
+	env := Env{
+		ProjectName: "p", GuestUser: "u", GuestHome: "/home/u",
+		Scripts: []string{"/h/p/b.sh", "/h/p/a.sh"},
+	}
+	r, err := Resolve(Flags{}, Spec{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Scripts) != 2 || r.Scripts[0] != "/h/p/b.sh" || r.Scripts[1] != "/h/p/a.sh" {
+		t.Errorf("Scripts = %v, want spec order preserved", r.Scripts)
+	}
+}
+
 func TestResolveModulesFromFlags(t *testing.T) {
 	f := Flags{Modules: []string{"node@lts", "go"}, ModulesSet: true}
 	r, err := Resolve(f, Spec{}, Env{ProjectName: "p", GuestUser: "u", GuestHome: "/home/u"})

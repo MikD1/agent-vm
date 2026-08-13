@@ -132,6 +132,7 @@ type Spec struct {
 	Base      Base                `yaml:"base,omitempty"`
 	Mounts    []MountSpec         `yaml:"mounts,omitempty"`
 	Files     map[string]FileSpec `yaml:"files,omitempty"`
+	Scripts   []string            `yaml:"scripts,omitempty"`
 }
 
 // Load parses a .agent-vm.yaml file into a Spec.

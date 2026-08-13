@@ -136,6 +136,11 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
+			scriptInputs, err := resolveScriptInputs(spec.Scripts, absDir)
+			if err != nil {
+				return err
+			}
+
 			env := config.Env{
 				ProjectName: projName,
 				GuestUser:   user,
@@ -144,6 +149,7 @@ func newCreateCmd() *cobra.Command {
 				SpecPresent: specPresent,
 				Mounts:      mountInputs,
 				Files:       fileInputs,
+				Scripts:     scriptInputs,
 			}
 			resolved, err := config.Resolve(f, spec, env)
 			if err != nil {

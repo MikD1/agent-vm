@@ -143,6 +143,27 @@ func TestResolveFileInputs(t *testing.T) {
 	}
 }
 
+func TestResolveScriptInputs(t *testing.T) {
+	specDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(specDir, "provision"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(specDir, "provision", "docker.sh")
+	if err := os.WriteFile(p, []byte("#!/usr/bin/env bash\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveScriptInputs([]string{"provision/docker.sh"}, specDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != p {
+		t.Errorf("resolveScriptInputs() = %v, want [%s]", got, p)
+	}
+	if _, err := resolveScriptInputs([]string{"nope.sh"}, specDir); err == nil {
+		t.Error("missing script = nil error, want an error")
+	}
+}
+
 func TestResolveFileInputsRejects(t *testing.T) {
 	specDir := t.TempDir()
 	store := t.TempDir()

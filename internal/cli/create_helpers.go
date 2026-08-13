@@ -132,6 +132,25 @@ func resolveFileInputs(specFiles map[string]config.FileSpec, specDir, storeRoot 
 	return out, nil
 }
 
+// resolveScriptInputs turns Spec `scripts` entries (relative to the spec dir)
+// into absolute host paths, checking each exists before the VM is created. Order
+// is preserved: scripts run in the order the Spec lists them.
+func resolveScriptInputs(specScripts []string, specDir string) ([]string, error) {
+	out := make([]string, 0, len(specScripts))
+	for _, s := range specScripts {
+		abs := s
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(specDir, abs)
+		}
+		abs = filepath.Clean(abs)
+		if _, err := os.Stat(abs); err != nil {
+			return nil, fmt.Errorf("scripts entry %q: %w", s, err)
+		}
+		out = append(out, abs)
+	}
+	return out, nil
+}
+
 // classifyFileRoot decides which mounted root a source belongs to and its path
 // relative to that root.
 func classifyFileRoot(abs, specDir, storeRoot string) (config.FileRoot, string, error) {

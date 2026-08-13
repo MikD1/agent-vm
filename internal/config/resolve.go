@@ -85,6 +85,7 @@ type Env struct {
 	SpecPresent bool
 	Mounts      []MountInput
 	Files       []FileInput
+	Scripts     []string
 }
 
 // Resolved is the materialized config: everything needed to build both the Lima
@@ -99,6 +100,7 @@ type Resolved struct {
 	Workspace Workspace
 	Mounts    []Mount
 	Files     []FileCopy
+	Scripts   []string
 }
 
 // Validate checks a Spec in isolation. Module names are mise tool references and
@@ -161,6 +163,14 @@ func (s Spec) Validate() error {
 		}
 		dest[f.To] = src
 	}
+	for _, s2 := range s.Scripts {
+		if s2 == "" {
+			return fmt.Errorf("scripts entry is empty")
+		}
+		if hasDotDot(s2) {
+			return fmt.Errorf("scripts entry %q must not contain ..", s2)
+		}
+	}
 	return nil
 }
 
@@ -218,6 +228,8 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	}
 	r.Mounts = mounts
 	r.Files = resolveFiles(env.Files, env.GuestHome)
+	// Scripts run in spec order, so this list is copied, never sorted.
+	r.Scripts = append([]string(nil), env.Scripts...)
 	return r, nil
 }
 

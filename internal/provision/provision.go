@@ -5,6 +5,7 @@ package provision
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/MikD1/agent-vm/internal/config"
@@ -104,6 +105,21 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 		fmt.Printf("==> Phase 5: writing %d config file(s)\n", len(r.Files))
 		if err := p.lima.Provision(ctx, r.Name, script, p.env(r)); err != nil {
 			return fmt.Errorf("phase 5 (files): %w", err)
+		}
+	}
+	// Phase 6 — user scripts, in spec order. Contents are piped in, so a script
+	// need not live under a mount. Root runs them with the same env contract the
+	// platform scripts get; to call a mise-installed tool, a script drops to the
+	// VM user's login shell (`sudo -u "$VM_USER" -H bash -lc '...'`), because
+	// root's PATH carries no shims during provisioning.
+	for _, sp := range r.Scripts {
+		fmt.Printf("==> Phase 6: script — %s\n", sp)
+		body, err := os.ReadFile(sp)
+		if err != nil {
+			return fmt.Errorf("phase 6 (%s): %w", sp, err)
+		}
+		if err := p.lima.Provision(ctx, r.Name, body, p.env(r)); err != nil {
+			return fmt.Errorf("phase 6 (%s): %w", sp, err)
 		}
 	}
 	// Phase 7 — restart, always. It applies group membership (docker),
