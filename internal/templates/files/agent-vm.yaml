@@ -1,15 +1,37 @@
+# Tools for this VM. Every entry is a mise tool: a name, optionally with a
+# version. A name with no version installs the latest release, so pin what you
+# care about. Anything in the mise registry works, as do backend references like
+# npm:@openai/codex — avm needs no change to support a new tool.
 modules:
-  - node      # Node.js LTS + npm/pnpm/yarn
-  - dotnet    # .NET SDK (LTS)
-  - go        # Go toolchain (latest stable)
-  - docker    # Docker CE
-  - claude    # Claude Code CLI (needs node)
-  - codex     # OpenAI Codex CLI (needs node)
+  - node: lts
+  - claude
+  # - go: "1.24"
+  # - dotnet: "10"
+  # - python: "3.12"
 
 resources:
   cpus: 4
   memory: 4GiB
   disk: 120GiB
+
+# Host files to copy into the guest. Sources are relative to this file, or
+# absolute — but they must sit either next to this file or under
+# ~/.config/agent-vm, the two directories the VM can see. Keep credentials in
+# ~/.config/agent-vm so they stay out of the repository.
+# files:
+#   claude-settings.json: ~/.claude/settings.json
+#   tmux.conf: ~/.tmux.conf
+#   codex-config.toml: ~/.codex/config.toml
+#   ~/.config/agent-vm/codex-auth.json:
+#     to: ~/.codex/auth.json
+#     mode: "0600"
+
+# Bash to run after the tools are installed and the files are in place. Runs as
+# root with VM_USER, VM_PROJECT, VM_WORKSPACE, and VM_SECRETS set. To use a tool
+# mise installed, drop to the VM user's login shell:
+#   sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
+# scripts:
+#   - provision/postgres.sh
 
 # Additional host folders to mount alongside the project (paths relative to this
 # file). Each is mounted read/write at ~/<basename> inside the VM. Use the

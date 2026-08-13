@@ -5,10 +5,10 @@
 ## Design principles
 
 - **Three clean layers.** Go orchestrates, Lima virtualizes, bash provisions. Each speaks to the next through a narrow, stable interface.
-- **Modules stay dumb.** Cross-cutting concerns (certificates, trust, global env) are applied by dedicated provisioning phases *around* modules, never by the modules themselves.
+- **Modules are tool references, not scripts.** A module is a [mise](https://mise.jdx.dev/) tool name plus an optional version; installing it is one `mise install` line, not bash the project owns. Cross-cutting concerns (certificates, trust, global env, Docker, mise itself) are applied by platform phases that run *around* the tools phase, never by a module.
 - **Declarative source vs realized state.** A portable, version-controlled *Project Spec* expresses intent; a host-local *VM Record* is its materialization. This mirrors the manifest-vs-lockfile / Terraform config-vs-state pattern.
 - **One managed VM ⇔ one registry record.** They live and die together; divergence (drift) is detected and reconciled, never assumed away.
-- **Single self-contained binary.** Provisioning scripts and templates are embedded into the binary; the only runtime dependency is Lima.
+- **Single self-contained binary.** Provisioning scripts and templates are embedded into the binary; the guest additionally installs a pinned mise release, so the only runtime dependency on the host stays Lima.
 
 ## 1. High-Level Architecture
 
@@ -21,7 +21,6 @@ graph TB
         subgraph Store["~/.config/agent-vm/ (host store)"]
             registry["vms/&lt;name&gt;.yaml<br/><i>VM Records (registry)</i>"]
             ca["ca-certificates/<br/><i>root CAs (PEM)</i>"]
-            modcfg["modules/&lt;name&gt;/<br/><i>module configs &amp; secrets</i>"]
             gitcfg[".gitconfig<br/><i>sanitized git config</i>"]
         end
         spec[".agent-vm.yaml<br/><i>Project Spec (in repo, optional)</i>"]
@@ -35,10 +34,13 @@ graph TB
         direction TB
         p0["Phase 0: base image"]
         p1["Phase 1: system layer<br/>(certs / trust / global env)"]
-        p2["Phase 2: base module"]
-        p3["Phase 3: feature modules"]
+        p2["Phase 2: platform<br/>(apt packages, Docker, mise)"]
+        p3["Phase 3: tools<br/>(one mise install)"]
         p4["Phase 4: workspace<br/>(mount ready / clone)"]
-        p0 --> p1 --> p2 --> p3 --> p4
+        p5["Phase 5: config files"]
+        p6["Phase 6: user scripts"]
+        p7["Phase 7: restart"]
+        p0 --> p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7
     end
 
     cli -- "reads / writes" --> registry
@@ -47,7 +49,7 @@ graph TB
     limactl -- "provisions" --> Guest
     Store -. "RO virtiofs mount<br/>/mnt/host/agent-vm" .-> Guest
     ca -. "source for" .-> p1
-    modcfg -. "source for" .-> p3
+    spec -. "source for" .-> p5
 ```
 
 **Layer boundaries:**
@@ -56,7 +58,7 @@ graph TB
 |-------|----------------|-------------------------|
 | Go CLI | Parse config, manage the registry, plan provisioning, drive lifecycle | `limactl` subprocess calls (stable CLI contract) |
 | Lima | Create/run VMs, mounts, SSH, exec | Bash executed in guest via `limactl shell ... sudo bash -s` |
-| Bash provisioning | Install software, configure the guest | Guest env contract (see §5) |
+| Bash provisioning | The guest scripts are the platform layer: certificates, apt packages, Docker, mise, config files, workspace, restart. Per-tool installation is delegated to mise, driven by one rendered `mise install` rather than a script per tool. | Guest env contract (see §5) |
 
 ## 2. CLI Language: Go
 
@@ -67,7 +69,7 @@ Go is the language of the CLI orchestrator.
 | Language | **Go** | Lima is itself Go; trivial cross-compilation to a single static binary; mature CLI ecosystem (cobra); `go:embed` packages provisioning scripts into the binary. |
 | Lima integration | **Shell out to `limactl`**, not a library import | Lima exposes no stable public Go API; internal packages change between releases. The `limactl` CLI contract is stable. |
 | Provisioning driver | **Go drives the phases** via `limactl shell <vm> sudo bash -s` (stdin), rather than Lima `provision:` blocks | Go controls ordering, per-phase status, error handling, and reconciliation; better diagnostics and rollback. |
-| Module packaging | **`go:embed` for built-in modules + templates**, plus runtime discovery of an external module directory | A single self-contained binary for distribution, without losing extensibility for custom modules. |
+| Module packaging | **`go:embed` for the platform provisioning scripts and the spec template**; the tools themselves are mise references resolved at provision time, not embedded per-tool scripts | A single self-contained binary for distribution; adding a new tool needs no code change, only a new entry in the Spec's `modules`. |
 | Config parsing | **Native Go structs + `gopkg.in/yaml.v3`**, validation in Go | Type-safe, unit-testable validation; the only runtime dependency stays Lima. |
 | CLI framework | **cobra** | De-facto standard for subcommands, flags, and help. |
 | Distribution | GitHub Releases + `install.sh` (and `go install`) | Single binary; Lima is the only external dependency. The installer can install Lima through an existing Homebrew installation, but does not require a Homebrew tap for `avm`. |
@@ -81,8 +83,7 @@ graph TD
     config["internal/config<br/>Project Spec parse + validate"]
     registry["internal/registry<br/>VM Records (host store)"]
     lima["internal/lima<br/>limactl wrapper"]
-    provision["internal/provision<br/>phase planner + module runner"]
-    modules["internal/modules<br/>go:embed scripts + external discovery"]
+    provision["internal/provision<br/>phase planner + go:embed platform scripts"]
     vmname["internal/vmname<br/>normalize / validate names"]
 
     main --> cli
@@ -91,12 +92,11 @@ graph TD
     cli --> provision
     cli --> vmname
     provision --> lima
-    provision --> modules
     registry --> lima
     config --> vmname
 ```
 
-Dependency rule: `internal/lima` is the only package that knows about `limactl`; everything else speaks in domain types. `internal/modules` is the only package that knows the embedded/on-disk layout of the bash scripts.
+Dependency rule: `internal/lima` is the only package that knows about `limactl`; everything else speaks in domain types. `internal/provision` embeds its own platform scripts (`internal/provision/scripts/*.sh`) and renders the `mise install` invocation and the `files`/`scripts` phases directly from the resolved config — there is no separate module-runner package.
 
 `internal/lima`'s `ExecRunner` filters `limactl`'s logrus-formatted stderr before it reaches the terminal: normal mode shows only warnings and errors, `--verbose` shows every line, and both strip the `time=…level=…` prefix (and trailing key=value fields) down to the message text. The raw stderr is still captured separately to build error messages.
 
@@ -109,7 +109,7 @@ The system has **two** config artifacts with distinct, non-overlapping roles. Th
 | Author | human | the tool |
 | Location | in the repo, under version control | host-local, never shared |
 | Role | *intent* — what kind of VM this project wants | *materialization* — what VM actually exists on this host |
-| Contains | modules, resources, `base.image` | the resolved spec **plus** create-time facts: absolute host path (mount) or repo URL + ref + in-guest path (clone), resolved base image, `source: project\|cli`, VM name, created-at |
+| Contains | modules, resources, `files`, `scripts`, `base.image` | the resolved spec **plus** create-time facts: absolute host path (mount) or repo URL + ref + in-guest path (clone), resolved base image, `source: project\|cli`, VM name, created-at, resolved `files` entries, `scripts` paths, and `installedTools` — the tool versions mise actually resolved |
 | Portable | **yes** — moves config between people and machines | no — local instance state |
 | May be absent | yes (clone from a bare repo) | no — always present for a managed VM |
 
@@ -128,12 +128,16 @@ flags  >  in-repo .agent-vm.yaml  >  built-in defaults
 ```yaml
 # Authored by a human, committed to the repo.
 modules:
-  - node
+  - node: lts
   - claude
 resources:
   cpus: 4
   memory: 8GiB
   disk: 120GiB
+files:
+  claude-settings.json: ~/.claude/settings.json
+scripts:
+  - provision/postgres.sh
 # Optional: pin a base image (e.g. a corporate one). Defaults to Ubuntu.
 # base:
 #   image: corp-ubuntu-2204-hardened
@@ -151,7 +155,8 @@ createdAt: "2026-06-14T12:00:00Z"
 user: m_doshevsky           # resolved guest Linux username
 base:
   image: template:_images/ubuntu
-modules: [node, claude]
+modules: [{ node: lts }, claude]
+installedTools: [{ node: 22.9.0 }, { claude: 2.1.4 }]  # what mise actually resolved
 resources: { cpus: 4, memory: 8GiB, disk: 120GiB }
 workspace:
   mode: clone          # or: mount
@@ -162,11 +167,15 @@ workspace:
   # mount mode would instead carry:
   # hostPath: /Users/me/projects/my-api
   # guestPath: /home/user.linux/my-api
+files:
+  - { root: workspace, rel: claude-settings.json, to: ~/.claude/settings.json }
+scripts:
+  - provision/postgres.sh
 ```
 
 ## 4. Provisioning Model — Phases
 
-Provisioning is a fixed sequence of phases, driven from Go. Cross-cutting concerns are isolated into their own phases that run *around* modules, so each module stays focused on installing a single tool.
+Provisioning is a fixed sequence of phases, driven from Go. Cross-cutting concerns are isolated into their own phases that run *around* the tools phase, so a project's `modules` list drives exactly one thing: which tools `mise install` resolves.
 
 ```mermaid
 sequenceDiagram
@@ -180,13 +189,11 @@ sequenceDiagram
 
     CLI->>Guest: Phase 1 — system layer (sudo bash -s)
     Note over Guest: install CA certs into system trust store,<br/>set global env (/etc/environment, /etc/profile.d)
-    CLI->>Guest: Phase 2 — base module
-    Note over Guest: git, curl, ripgrep, fd, build-essential, sanitized gitconfig
+    CLI->>Guest: Phase 2 — platform (sudo bash -s)
+    Note over Guest: base packages, Docker, mise itself — always installed, never selected by a project
 
-    loop each feature module in spec order
-        CLI->>Guest: Phase 3 — module (sudo bash -s, env contract)
-        Note over Guest: e.g. node, dotnet, docker, claude, codex
-    end
+    CLI->>Guest: Phase 3 — tools (sudo bash -s)
+    Note over Guest: one rendered `mise install` for every module in the spec;<br/>`mise ls -i -J` reports back the resolved versions
 
     alt workspace.mode == clone
         CLI->>Guest: Phase 4 — git clone <repo> <guestPath><br/>(SSH agent forwarded)
@@ -194,10 +201,17 @@ sequenceDiagram
         Note over Guest: Phase 4 — workspace already present via virtiofs mount
     end
 
-    CLI->>Lima: restart only if docker module selected
+    CLI->>Guest: Phase 5 — config files (sudo bash -s)
+    Note over Guest: copy each `files` entry from its mount to its guest destination
+
+    loop each entry in spec order
+        CLI->>Guest: Phase 6 — user script (sudo bash -s, env contract)
+    end
+
+    CLI->>Lima: restart, unconditionally
 ```
 
-Phases 1 and 4 isolate the cross-cutting and workspace concerns; phases 2–3 run the modules. The planner owns ordering and per-phase status across the whole sequence.
+Phases 1, 4, and 5–6 isolate the cross-cutting, workspace, and project-supplied concerns; phase 3 is the only one that depends on the project's tool selection. The planner owns ordering and per-phase status across the whole sequence, and the restart is unconditional because any provisioned VM may have changed group membership or global env.
 
 ## 5. Guest Env Contract
 
@@ -208,9 +222,9 @@ Each provisioning script runs as root, with `DEBIAN_FRONTEND=noninteractive`, fe
 | `VM_USER` | unprivileged guest user | for `sudo -u` and `usermod` |
 | `VM_PROJECT` | project / VM name | naming, labels |
 | `VM_WORKSPACE` | absolute path to the code in the guest | mount point (mount) or clone dir (clone) |
-| `VM_SECRETS` | `/mnt/host/agent-vm` (read-only) | module configs at `$VM_SECRETS/modules/<name>/` |
+| `VM_SECRETS` | `/mnt/host/agent-vm` (read-only) | source root for `files` entries anchored under `~/.config/agent-vm/` |
 
-Certificates are deliberately *not* in this contract. A module never reads `ca-certificates/` and never sets `NODE_EXTRA_CA_CERTS` — the system layer (Phase 1) has already configured trust globally before any module runs. This is the concrete mechanism by which modules know nothing about certificates.
+Certificates are deliberately *not* in this contract. No platform script or `files`/`scripts` entry reads `ca-certificates/` or sets `NODE_EXTRA_CA_CERTS` — the system layer (Phase 1) has already configured trust globally before anything else runs. This is the concrete mechanism by which tools know nothing about certificates.
 
 ## 6. Certificate Architecture
 
@@ -228,17 +242,17 @@ graph TB
         env["Global env<br/>/etc/environment + /etc/profile.d/*.sh<br/>NODE_EXTRA_CA_CERTS, SSL_CERT_FILE,<br/>REQUESTS_CA_BUNDLE, GIT_SSL_CAINFO, ..."]
     end
 
-    subgraph Modules["Phases 2-3 — modules"]
-        m["node / dotnet / docker / claude / codex<br/><i>inherit trust transparently</i>"]
+    subgraph Tools["Phases 2-3 — platform + tools"]
+        m["Docker, mise, and every mise-installed tool<br/><i>inherit trust transparently</i>"]
     end
 
     baseimg -- "may already carry corp CAs" --> trust
     hostca -- "layered on top, idempotent" --> trust
     trust --> env
-    env -- "inherited, never referenced" --> Modules
+    env -- "inherited, never referenced" --> Tools
 ```
 
-At the **image level**, `base.image` may point at a pre-built corporate image that already carries its own trust configuration; the tool builds on top of it. At the **provision level**, the Phase 1 system layer always installs host-provided CAs from `~/.config/agent-vm/ca-certificates/` into the system trust store and exports trust env vars globally — both in `/etc/profile.d` (login shells: SSH, VS Code) and `/etc/environment` (non-login shells: `limactl shell`). Every later tool and module inherits trust with no per-module code. The tool does not build images; `base.image` consumes an already-prepared image.
+At the **image level**, `base.image` may point at a pre-built corporate image that already carries its own trust configuration; the tool builds on top of it. At the **provision level**, the Phase 1 system layer always installs host-provided CAs from `~/.config/agent-vm/ca-certificates/` into the system trust store and exports trust env vars globally — both in `/etc/profile.d` (login shells: SSH, VS Code) and `/etc/environment` (non-login shells: `limactl shell`). Every later tool inherits trust with no per-tool code. The tool does not build images; `base.image` consumes an already-prepared image.
 
 ## 7. VM Registry & Lifecycle
 
@@ -349,14 +363,13 @@ internal/
   config/                   Project Spec schema + validation
   registry/                 VM Records (host store) + reconciliation
   lima/                     limactl wrapper (only limactl-aware package)
-  provision/                phase planner + module runner
-  modules/                  go:embed bash modules + external discovery
+  provision/                phase planner + go:embed platform scripts
   vmname/                   name normalization / validation
-internal/modules/scripts/*.sh   bash provisioning scripts (go:embed'd into internal/modules)
-internal/templates/files/*      Lima base template + spec template (go:embed'd into internal/templates)
+internal/provision/scripts/*.sh   platform provisioning scripts (go:embed'd into internal/provision)
+internal/templates/files/*        Lima base template + spec template (go:embed'd into internal/templates)
 ```
 
-Built-in modules and templates are embedded into the binary. A host-side module directory (e.g. `~/.config/agent-vm/modules.d/`) is discovered at runtime for user-defined modules, giving a single binary plus extensibility.
+The platform provisioning scripts and both templates are embedded into the binary, so `avm` ships as a single file. Per-tool installation needs no code or embedded script of its own — it is a `modules` entry that mise resolves at provision time.
 
 ## 11. Non-goals
 
@@ -369,7 +382,7 @@ The architecture deliberately does not include: building derived/baked images fr
 | D1 | CLI language is Go. |
 | D2 | Integrate Lima by shelling out to `limactl`, not as a library. |
 | D3 | Go drives provisioning phases; bash is the in-guest provisioning language. |
-| D4 | Built-in modules/templates embedded via `go:embed`; external modules discovered at runtime. |
+| D4 | Platform provisioning scripts and templates embedded via `go:embed`; per-tool installation delegated to mise, so a new tool needs no code change. |
 | D5 | Config parsed natively in Go; Lima is the only runtime dependency. |
 | D6 | Certificates handled by a Phase 1 system layer + global env; modules are unaware. |
 | D7 | Support a corporate `base.image`; the tool does not build images. |

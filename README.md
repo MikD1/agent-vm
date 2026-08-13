@@ -34,8 +34,6 @@ go install ./cmd/avm
 
 ## Usage
 
-### Scenario A — mount mode (code on the host)
-
 The host project directory is mounted into the VM; you edit on the host and the VM
 sees the changes. Commit/diff/branch inside the VM; push/pull on the host where
 credentials live.
@@ -46,20 +44,6 @@ avm init                 # write .agent-vm.yaml, then edit it to select modules
 avm create               # create + provision the VM (Record + VM)
 avm shell                # open a shell at the workspace
 ```
-
-### Scenario B — clone mode (code never on the host)
-
-No host mount: the repo is cloned inside the VM, authenticated through your
-forwarded SSH agent (keys stay on the host). The VM Record is the only host-side
-description of the VM.
-
-```bash
-avm create --repo=git@github.com:acme/my-api.git --modules=node,claude
-avm shell my-api
-```
-
-With no `--modules` and no `.agent-vm.yaml` in the repo, a default set
-(`node`, `claude`) is installed.
 
 ### Additional mounts — projects spanning multiple folders
 
@@ -76,19 +60,17 @@ avm create --mount ../shared-lib --mount ../tools/cli
 
 Each folder mounts read/write at `~/<basename>` in the guest, or at `~/<name>`
 if you set an explicit `name:` in the spec to resolve a basename collision.
-This works with either primary workspace mode (mount or clone). Additional
-mounts are always writable, need no provisioning of their own — Lima mounts
-everything at VM start — and are stored in the VM Record, so `avm recreate`
-reproduces them automatically without passing `--mount` again.
+Additional mounts are always writable, need no provisioning of their own — Lima
+mounts everything at VM start — and are stored in the VM Record, so
+`avm recreate` reproduces them automatically without passing `--mount` again.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `avm init [path]` | Write a `.agent-vm.yaml` template. `--force` overwrites. |
-| `avm create [path]` | Mount mode from a project dir. Add `--mount PATH` (repeatable) to mount extra host folders. |
-| `avm create --repo=URL` | Clone mode (`--ref`, `--modules`, `--cpus`, `--memory`, `--disk`, `--base-image`). |
-| `avm recreate <name>` | Pristine rebuild from the record (clone mode re-clones — commit & push first). |
+| `avm create [path]` | Create + provision the VM from a project dir. Add `--mount PATH` (repeatable) to mount extra host folders. |
+| `avm recreate <name>` | Pristine rebuild from the record. |
 | `avm list` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state (running / stopped). |
 | `avm shell [name]` | Open a shell in the VM. |
 | `avm start/stop/restart [name]` | Lifecycle controls. |
@@ -106,80 +88,97 @@ reproduces them automatically without passing `--mount` again.
 ## Project config — `.agent-vm.yaml`
 
 ```yaml
-modules: [node, docker, claude]
+modules:             # mise tools; a name with no version installs the latest
+  - node: lts
+  - go: "1.24"
+  - claude
+
 resources:
-  cpus: 8        # default 4
-  memory: 16GiB  # default 4GiB
-  disk: 200GiB   # default 120GiB
+  cpus: 8            # default 4
+  memory: 16GiB      # default 4GiB
+  disk: 200GiB       # default 120GiB
+
 # base: { image: corp-ubuntu }   # optional; default template:_images/ubuntu
-mounts:              # optional: extra host folders, relative to this file
+
+files:               # host source → guest destination
+  claude-settings.json: ~/.claude/settings.json
+  ~/.config/agent-vm/codex-auth.json:
+    to: ~/.codex/auth.json
+    mode: "0600"
+
+scripts:             # bash, run last, as root
+  - provision/postgres.sh
+
+mounts:              # extra host folders, relative to this file
   - ../shared-lib    #   → mounted read/write at ~/shared-lib
 ```
 
 ## Modules
 
-| Module | Description |
-|--------|-------------|
-| `node` | Node.js LTS + npm/pnpm/yarn |
-| `dotnet` | .NET SDK (LTS) |
-| `go` | Go toolchain (latest stable) |
-| `docker` | Docker CE |
-| `claude` | Claude Code CLI (needs `node`) |
-| `codex` | OpenAI Codex CLI (needs `node`) |
+A module is a [mise](https://mise.jdx.dev/) tool: a name, optionally with a
+version. Anything in mise's registry works, as do backend references such as
+`npm:@openai/codex` or `aqua:owner/repo` — `avm` needs no change to support a new
+tool.
 
-The `base` module (git, curl, jq, ripgrep, fd, build-essential) is always installed.
+```yaml
+modules:
+  - node: lts        # a pinned alias
+  - go: "1.24"       # a pinned version
+  - claude           # no version → the latest release
+  - python: "3.12"
+```
 
-### Configuring the `claude` module
+Tools install system-wide under `/usr/local/share/mise`, and their shim directory
+is on `PATH` in login shells, in the shell `avm shell` opens, and under `sudo`.
+`avm` records the versions mise actually resolved in the VM Record.
 
-The `claude` module picks up two optional files from the host secrets directory
-(`~/.config/agent-vm/`, mounted read-only into the VM). Both are applied at
-provision time — edit them before `avm create`, or run `avm recreate <name>` to
+Every VM also gets, without being asked: the host CA certificates in the system
+trust store, a sanitized `.gitconfig`, `git`, `curl`, `jq`, `ripgrep`, `fd`,
+`build-essential`, Docker, and mise itself.
+
+## Config files
+
+Tool configuration and credentials are declared in `files`, as host source →
+guest destination. Sources are relative to `.agent-vm.yaml`, or absolute, and
+must sit either next to it or under `~/.config/agent-vm/` — the two directories
+the VM can see. Keep credentials in `~/.config/agent-vm/` so they stay out of the
+repository.
+
+```yaml
+files:
+  claude-settings.json: ~/.claude/settings.json
+  codex-config.toml: ~/.codex/config.toml
+  tmux.conf: ~/.tmux.conf
+  ~/.config/agent-vm/codex-auth.json:
+    to: ~/.codex/auth.json
+    mode: "0600"
+```
+
+The destination may be absolute or start with `~/`. `mode` defaults to `0644`;
+set it to `0600` for anything holding credentials. A directory source is copied
+recursively and keeps its own permissions, so `mode` is not allowed on one.
+
+Files are copied at provision time. Edit them and run `avm recreate <name>` to
 apply changes to an existing VM.
 
-**Settings** — drop a [Claude Code settings file](https://docs.claude.com/en/docs/claude-code/settings)
-at `~/.config/agent-vm/modules/claude/settings.json`. It is copied verbatim to
-`~/.claude/settings.json` inside the VM, so it can carry permissions, environment
-variables, hooks, model selection, and the like.
+## Provisioning scripts
 
-**Plugins** — list plugins to install, one per line, in
-`~/.config/agent-vm/modules/claude/plugins`:
+For anything neither a tool nor a file — a database, a service, a corporate
+setup step — list bash scripts in `scripts`. They run last, in order, as root,
+with `VM_USER`, `VM_PROJECT`, `VM_WORKSPACE`, and `VM_SECRETS` set, and a
+non-zero exit fails provisioning.
 
-```
-# blank lines and #-comments are ignored
-some-plugin                  # bare name → official marketplace
-other-plugin@my-marketplace  # name@marketplace → that marketplace
+```yaml
+scripts:
+  - provision/postgres.sh
 ```
 
-A bare `name` installs from the official marketplace
-(`anthropics/claude-plugins-official`), which the module adds and updates for you;
-`name@marketplace` targets another marketplace, which must already be registered.
-Plugins install at user scope into the VM user's `~/.claude`; one that fails to
-install logs a warning and provisioning continues.
+Root's `PATH` carries no mise shims during provisioning, so to use an installed
+tool, drop to the VM user's login shell:
 
-### Configuring the `codex` module
-
-The `codex` module installs the OpenAI Codex CLI (`npm install -g @openai/codex`)
-and, like `claude`, needs the `node` module installed first.
-
-At provision time the module writes a minimal reference `~/.codex/config.toml`
-inside the VM:
-
-```toml
-# Full-auto YOLO mode: no approval prompts, no sandbox.
-approval_policy = "never"
-sandbox_mode = "danger-full-access"
+```bash
+sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
 ```
-
-You can edit this file inside the VM at any time, or run `avm recreate <name>`
-to reprovision from scratch. To add MCP servers, add
-[`[mcp_servers.<id>]` tables](https://developers.openai.com/codex/config-reference)
-to that file.
-
-**Credentials** — to authenticate non-interactively, drop the auth file at
-`~/.config/agent-vm/modules/codex/auth.json` (the same JSON Codex writes when you
-run `codex login`). It is copied to `~/.codex/auth.json` inside the VM with `0600`
-permissions. Without it, sign in from inside the VM with `codex login`, or set
-`OPENAI_API_KEY`.
 
 ## How it works
 
@@ -189,12 +188,15 @@ permissions. Without it, sign in from inside the VM with `codex login`, or set
    only thing that reasons in domain terms.
 2. **Lima** virtualizes: `avm` shells out to `limactl` (a stable CLI contract) to
    create/start/shell/delete VMs.
-3. **Bash provisioning** runs inside the guest in a fixed phase sequence.
+3. **Bash provisioning** runs inside the guest in a fixed phase sequence: system
+   layer (certificates, trust) → platform (apt packages, Docker, mise) → tools
+   (one `mise install`) → workspace → config files → user scripts → restart. Only
+   the tools phase depends on the project; everything else is the same on every VM.
 
 ### Two config artifacts
 
 - **Project Spec** (`.agent-vm.yaml`, in your repo) — portable *intent*: modules,
-  resources, optional base image.
+  resources, files, scripts, optional base image.
 - **VM Record** (`~/.config/agent-vm/vms/<name>.yaml`, host-local) — the tool's
   *materialization* of one Lima VM (resolved spec + create-time facts). `avm`
   reconciles the registry against Lima on every `list` and labels each VM
@@ -207,11 +209,16 @@ permissions. Without it, sign in from inside the VM with `codex login`, or set
 ```
 Phase 0  create + start the VM from the base image
 Phase 1  system layer — install host CA certs into the trust store, export trust
-         env globally (modules never touch certificates)
-Phase 2  base module — git, curl, jq, ripgrep, fd, build-essential, sanitized gitconfig
-Phase 3  feature modules in spec order (node, dotnet, go, docker, claude)
-Phase 4  workspace — mount is already present; clone runs `git clone` via the
-         forwarded SSH agent
+         env globally (tools never touch certificates)
+Phase 2  platform — apt packages, Docker, mise itself; always installed, never
+         selected by a project
+Phase 3  tools — one `mise install` for every module in the spec
+Phase 4  workspace — mount is already present via virtiofs
+Phase 5  config files — copy each `files` entry from the host mount to its guest
+         destination
+Phase 6  user scripts — run each `scripts` entry, in order, as root
+Phase 7  restart — applies group membership (docker) and anything else a live
+         session holds
 ```
 
 Each script runs as root with a small env contract: `VM_USER`, `VM_PROJECT`,
@@ -221,11 +228,10 @@ Each script runs as root with a small env contract: `VM_USER`, `VM_PROJECT`,
 
 Drop PEM root CAs into `~/.config/agent-vm/ca-certificates/`; the Phase 1 system
 layer installs them into the VM trust store and exports the trust env globally, so
-node/git/python/curl all inherit it with no per-module configuration.
+node/git/python/curl all inherit it with no per-tool configuration.
 
 ## Security
 
 - Each project is isolated in its own VM.
 - Secrets are mounted read-only from the host.
-- Git credentials stay on the host (mount mode) or in the forwarded SSH agent
-  (clone mode) — keys never leave the host.
+- Git credentials stay on the host — they never leave it.
