@@ -83,6 +83,40 @@ func TestPlanCloneAddsClonePhase(t *testing.T) {
 	}
 }
 
+func TestPlanFilesPhase(t *testing.T) {
+	rec := &recorder{}
+	r := mountResolved()
+	r.Files = []config.FileCopy{
+		{Root: config.RootWorkspace, Rel: "settings.json", To: "/home/me.linux/.claude/settings.json", Mode: "0644"},
+	}
+	p := New(lima.New(rec), false)
+	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	var sawCopy bool
+	for _, in := range rec.stdin {
+		if strings.Contains(in, `cp -R "${VM_WORKSPACE}/settings.json"`) {
+			sawCopy = true
+		}
+	}
+	if !sawCopy {
+		t.Errorf("no files phase ran; stdin was %#v", rec.stdin)
+	}
+}
+
+func TestPlanSkipsEmptyFilesPhase(t *testing.T) {
+	rec := &recorder{}
+	p := New(lima.New(rec), false)
+	if err := p.Run(context.Background(), mountResolved(), "/tmp/cfg.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	// Same op count as Task 5's mount case: no extra shell for an empty files list.
+	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
+	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("ops = %v, want %v", got, want)
+	}
+}
+
 func TestRenderMiseInstall(t *testing.T) {
 	got := string(renderMiseInstall([]config.ModuleSpec{{Name: "node", Version: "lts"}}, false))
 	for _, want := range []string{

@@ -17,7 +17,7 @@ func recordToResolved(rec registry.Record) config.Resolved {
 	return config.Resolved{
 		Name: rec.Name, Source: rec.Source, User: rec.User,
 		Modules: rec.Modules, Resources: rec.Resources, Base: rec.Base,
-		Workspace: rec.Workspace, Mounts: rec.Mounts,
+		Workspace: rec.Workspace, Mounts: rec.Mounts, Files: rec.Files,
 	}
 }
 

@@ -99,6 +99,13 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 			return fmt.Errorf("phase 4 (clone): %w", err)
 		}
 	}
+	// Phase 5 — configuration files, copied out of the mounts.
+	if script := renderFileCopies(r.Files); len(script) > 0 {
+		fmt.Printf("==> Phase 5: writing %d config file(s)\n", len(r.Files))
+		if err := p.lima.Provision(ctx, r.Name, script, p.env(r)); err != nil {
+			return fmt.Errorf("phase 5 (files): %w", err)
+		}
+	}
 	// Phase 7 — restart, always. It applies group membership (docker),
 	// /etc/environment, and anything the guest changed that a live session holds.
 	fmt.Printf("==> Restarting VM to apply provisioning\n")
