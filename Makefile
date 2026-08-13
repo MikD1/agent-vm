@@ -1,6 +1,6 @@
 BINARY := avm
 PKG := github.com/MikD1/agent-vm
-SHELL_SCRIPTS := install.sh internal/modules/scripts/*.sh
+SHELL_SCRIPTS := install.sh internal/provision/scripts/*.sh
 
 .PHONY: build test vet shellcheck lint all
 all: vet test build
