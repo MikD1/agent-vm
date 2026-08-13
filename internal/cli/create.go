@@ -17,15 +17,14 @@ import (
 
 // createDeps are the injectable dependencies of runCreate (real or faked in tests).
 type createDeps struct {
-	lima        *lima.Client
-	store       *registry.Store
-	externalDir string
+	lima  *lima.Client
+	store *registry.Store
 }
 
 // runCreate performs Record-first creation: refuse on existing Record, write the
 // Record, build the VM, and on any provisioning failure roll the VM back while
 // keeping the Record (→ OrphanedRecord).
-func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHome string, now time.Time) error {
+func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHome string, now time.Time, verbose bool) error {
 	exists, err := deps.store.Exists(r.Name)
 	if err != nil {
 		return err
@@ -56,7 +55,7 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 	}
 
 	// Build the VM. On failure: roll the VM artifact back, KEEP the Record.
-	p := provision.New(deps.lima, deps.externalDir)
+	p := provision.New(deps.lima, verbose)
 	if provErr := p.Run(ctx, r, tmp.Name()); provErr != nil {
 		rollbackMsg := "VM rolled back"
 		if delErr := deps.lima.Delete(ctx, r.Name); delErr != nil {
@@ -111,7 +110,6 @@ func newCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			extDir := externalModuleDir(root)
 
 			spec, specPresent, hostPath, err := loadSpecForCreate(f, absDir)
 			if err != nil {
@@ -142,12 +140,12 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
+			verbose, _ := cmd.Flags().GetBool("verbose")
 			deps := createDeps{
-				lima:        limaClient,
-				store:       registry.NewStore(root),
-				externalDir: extDir,
+				lima:  limaClient,
+				store: registry.NewStore(root),
 			}
-			return runCreate(ctx, deps, resolved, home, time.Now())
+			return runCreate(ctx, deps, resolved, home, time.Now(), verbose)
 		},
 	}
 	cmd.Flags().StringSliceVar(&f.Modules, "modules", nil, "feature modules in order (a,b,c)")

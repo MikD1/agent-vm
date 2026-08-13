@@ -1,5 +1,5 @@
 // Package provision drives the fixed phase sequence (create/start → system →
-// base → feature modules → workspace → optional restart) via a lima.Client.
+// platform → tools → workspace → restart) via a lima.Client.
 package provision
 
 import (
@@ -9,18 +9,17 @@ import (
 
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/lima"
-	"github.com/MikD1/agent-vm/internal/modules"
 )
 
 // Provisioner runs the phases for one VM.
 type Provisioner struct {
-	lima        *lima.Client
-	externalDir string // user module dir; "" disables external discovery
+	lima    *lima.Client
+	verbose bool // mirrors --verbose onto the tools the guest runs
 }
 
 // New builds a Provisioner.
-func New(c *lima.Client, externalDir string) *Provisioner {
-	return &Provisioner{lima: c, externalDir: externalDir}
+func New(c *lima.Client, verbose bool) *Provisioner {
+	return &Provisioner{lima: c, verbose: verbose}
 }
 
 func (p *Provisioner) env(r config.Resolved) map[string]string {
@@ -32,10 +31,15 @@ func (p *Provisioner) env(r config.Resolved) map[string]string {
 	}
 }
 
-func (p *Provisioner) provisionModule(ctx context.Context, r config.Resolved, name string) error {
-	script, err := modules.Script(name, p.externalDir)
+// platform runs one embedded platform script. MISE_VERSION is prepended for the
+// bootstrap rather than threaded through lima.Provision's fixed VM_* contract.
+func (p *Provisioner) platform(ctx context.Context, r config.Resolved, name string) error {
+	script, err := guestScript(name)
 	if err != nil {
 		return err
+	}
+	if name == "mise" {
+		script = append([]byte(fmt.Sprintf("export MISE_VERSION=%s\n", miseVersion)), script...)
 	}
 	return p.lima.Provision(ctx, r.Name, script, p.env(r))
 }
@@ -52,26 +56,27 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	if err := p.lima.Start(ctx, r.Name); err != nil {
 		return err
 	}
-	// Phase 1 — system layer.
+	// Phase 1 — system layer. Must precede everything that downloads: it is what
+	// installs the host CA certificates into the trust store.
 	fmt.Printf("==> Phase 1: system layer (CA certificates, trust env)\n")
-	if err := p.provisionModule(ctx, r, "system"); err != nil {
+	if err := p.platform(ctx, r, "system"); err != nil {
 		return fmt.Errorf("phase 1 (system): %w", err)
 	}
-	// Phase 2 — base module.
-	fmt.Printf("==> Phase 2: base module (git, curl, build tools)\n")
-	if err := p.provisionModule(ctx, r, "base"); err != nil {
-		return fmt.Errorf("phase 2 (base): %w", err)
+	// Phase 2 — platform. Always installed, never selected by a project.
+	for _, s := range []struct{ name, label string }{
+		{"base", "base packages (git, curl, build tools)"},
+		{"docker", "Docker"},
+		{"mise", "mise"},
+	} {
+		fmt.Printf("==> Phase 2: %s\n", s.label)
+		if err := p.platform(ctx, r, s.name); err != nil {
+			return fmt.Errorf("phase 2 (%s): %w", s.name, err)
+		}
 	}
-	// Phase 3 — feature modules in spec order.
-	needsRestart := false
-	for _, m := range r.Modules {
-		fmt.Printf("==> Phase 3: module — %s\n", m.Name)
-		if err := p.provisionModule(ctx, r, m.Name); err != nil {
-			return fmt.Errorf("phase 3 (%s): %w", m.Name, err)
-		}
-		if m.Name == "docker" {
-			needsRestart = true
-		}
+	// Phase 3 — tools, in one mise invocation.
+	fmt.Printf("==> Phase 3: installing %d tool(s) with mise\n", len(r.Modules))
+	if err := p.lima.Provision(ctx, r.Name, renderMiseInstall(r.Modules, p.verbose), p.env(r)); err != nil {
+		return fmt.Errorf("phase 3 (mise install): %w", err)
 	}
 	// Phase 4 — workspace (clone only; mount is already present via virtiofs).
 	if r.Workspace.Mode == config.ModeClone {
@@ -80,12 +85,11 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 			return fmt.Errorf("phase 4 (clone): %w", err)
 		}
 	}
-	// Post — restart only to apply docker group membership.
-	if needsRestart {
-		fmt.Printf("==> Restarting VM to apply docker group membership\n")
-		if err := p.lima.Restart(ctx, r.Name); err != nil {
-			return err
-		}
+	// Phase 7 — restart, always. It applies group membership (docker),
+	// /etc/environment, and anything the guest changed that a live session holds.
+	fmt.Printf("==> Restarting VM to apply provisioning\n")
+	if err := p.lima.Restart(ctx, r.Name); err != nil {
+		return err
 	}
 	return nil
 }

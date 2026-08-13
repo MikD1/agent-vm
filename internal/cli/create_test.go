@@ -44,7 +44,7 @@ func TestCreateRecordFirstThenRollback(t *testing.T) {
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
 	}
-	err := runCreate(context.Background(), deps, r, "/home/me", nowFixed())
+	err := runCreate(context.Background(), deps, r, "/home/me", nowFixed(), false)
 	if err == nil {
 		t.Fatal("want provisioning error")
 	}
@@ -64,7 +64,7 @@ func TestCreateRefusesExistingRecord(t *testing.T) {
 	_ = store.Write(registry.Record{Name: "my-api"})
 	deps := createDeps{lima: lima.New(&failRunner{}), store: store}
 	r := config.Resolved{Name: "my-api", Workspace: config.Workspace{Mode: "mount"}}
-	if err := runCreate(context.Background(), deps, r, "/home/me", nowFixed()); err == nil {
+	if err := runCreate(context.Background(), deps, r, "/home/me", nowFixed(), false); err == nil {
 		t.Error("create must refuse when a Record already exists")
 	}
 }

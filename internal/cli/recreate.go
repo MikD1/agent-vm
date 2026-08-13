@@ -23,7 +23,7 @@ func recordToResolved(rec registry.Record) config.Resolved {
 
 // runRecreate reads the Record, deletes any existing VM, and rebuilds pristinely.
 // The Record is NOT rewritten (it is the source of truth for recreation).
-func runRecreate(ctx context.Context, deps createDeps, name string) error {
+func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool) error {
 	rec, err := deps.store.Read(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -58,7 +58,7 @@ func runRecreate(ctx context.Context, deps createDeps, name string) error {
 	tmp.Close()
 
 	_ = deps.lima.Delete(ctx, name) // pristine: remove any existing VM first
-	p := provision.New(deps.lima, deps.externalDir)
+	p := provision.New(deps.lima, verbose)
 	if provErr := p.Run(ctx, r, tmp.Name()); provErr != nil {
 		rollbackMsg := "VM rolled back"
 		if delErr := deps.lima.Delete(ctx, name); delErr != nil {
@@ -83,8 +83,9 @@ func newRecreateCmd() *cobra.Command {
 				return err
 			}
 			store := registry.NewStore(root)
-			deps := createDeps{lima: limaClient, store: store, externalDir: externalModuleDir(root)}
-			return runRecreate(ctx, deps, args[0])
+			deps := createDeps{lima: limaClient, store: store}
+			verbose, _ := cmd.Flags().GetBool("verbose")
+			return runRecreate(ctx, deps, args[0], verbose)
 		},
 	}
 }

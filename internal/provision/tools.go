@@ -3,6 +3,7 @@ package provision
 import (
 	"bytes"
 	"fmt"
+	"path"
 
 	"github.com/MikD1/agent-vm/internal/config"
 )
@@ -29,5 +30,30 @@ func renderMiseConfig(mods []config.ModuleSpec) []byte {
 	for _, m := range mods {
 		fmt.Fprintf(&b, "%q = %q\n", m.Name, m.Version)
 	}
+	return b.Bytes()
+}
+
+// renderMiseInstall is the phase 3 script: write the system config, then install
+// every tool in one mise invocation. mise resolves its own ordering and
+// parallelizes downloads, so there is no per-module loop.
+//
+// MISE_DATA_DIR is exported here because lima.Provision's wrapper only exports
+// the VM_* contract. `mise reshim` runs afterwards so the shim directory is
+// populated even when a backend skips creating shims itself.
+func renderMiseInstall(mods []config.ModuleSpec, verbose bool) []byte {
+	flags := "-y"
+	if verbose {
+		flags = "-y --verbose"
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "export MISE_DATA_DIR=%s\n", miseDataDir)
+	fmt.Fprintf(&b, "install -d -m 0755 %s\n", path.Dir(miseConfigPath))
+	// A quoted heredoc delimiter: nothing in the config body is expanded. No tool
+	// name can contain the delimiter — the module reference regex forbids it.
+	fmt.Fprintf(&b, "cat > %s <<'AVM_MISE_CONFIG_EOF'\n", miseConfigPath)
+	b.Write(renderMiseConfig(mods))
+	b.WriteString("AVM_MISE_CONFIG_EOF\n")
+	fmt.Fprintf(&b, "mise install %s\n", flags)
+	b.WriteString("mise reshim\n")
 	return b.Bytes()
 }

@@ -19,15 +19,6 @@ func osUsername() string {
 	return "user"
 }
 
-// externalModuleDir returns the user module dir (<root>/modules.d) if it exists.
-func externalModuleDir(root string) string {
-	dir := filepath.Join(root, "modules.d")
-	if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
-		return dir
-	}
-	return ""
-}
-
 // projectName derives the VM name: for clone mode, from the repo basename;
 // otherwise from the directory basename.
 func projectName(f config.Flags, dir string) (string, error) {
