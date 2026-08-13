@@ -27,7 +27,7 @@ func ops(r *recorder) []string {
 func mountResolved() config.Resolved {
 	return config.Resolved{
 		Name:      "my-api",
-		Modules:   []string{"node", "docker"},
+		Modules:   []config.ModuleSpec{{Name: "node"}, {Name: "docker"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		User:      "me",
@@ -53,7 +53,7 @@ func TestPlanMountOrderAndDockerRestart(t *testing.T) {
 func TestPlanNoRestartWithoutDocker(t *testing.T) {
 	rec := &recorder{}
 	r := mountResolved()
-	r.Modules = []string{"node"}
+	r.Modules = []config.ModuleSpec{{Name: "node"}}
 	p := New(lima.New(rec), "")
 	_ = p.Run(context.Background(), r, "/tmp/cfg.yaml")
 	got := ops(rec)
@@ -66,7 +66,7 @@ func TestPlanNoRestartWithoutDocker(t *testing.T) {
 func TestPlanCloneAddsClonePhase(t *testing.T) {
 	rec := &recorder{}
 	r := mountResolved()
-	r.Modules = []string{"node"}
+	r.Modules = []config.ModuleSpec{{Name: "node"}}
 	r.Workspace = config.Workspace{Mode: "clone", GuestPath: "/home/me.linux/my-api", Repo: "git@h:a/b.git", Ref: "main"}
 	p := New(lima.New(rec), "")
 	_ = p.Run(context.Background(), r, "/tmp/cfg.yaml")

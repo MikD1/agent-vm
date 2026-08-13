@@ -39,7 +39,7 @@ func TestCreateRecordFirstThenRollback(t *testing.T) {
 	}
 	r := config.Resolved{
 		Name: "my-api", Source: "cli", User: "me",
-		Modules:   []string{"node"},
+		Modules:   []config.ModuleSpec{{Name: "node"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},

@@ -2,18 +2,18 @@ package config
 
 import "testing"
 
-func strs(v ...string) *[]string { return &v }
+func mods(v ...ModuleSpec) *[]ModuleSpec { return &v }
 
 func TestResolvePrecedence(t *testing.T) {
 	env := Env{ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", SpecPresent: true}
 	// flag modules override spec modules; flag cpus override spec cpus.
 	flags := Flags{Modules: []string{"go"}, ModulesSet: true, CPUs: 8}
-	spec := Spec{Modules: strs("node", "claude"), Resources: Resources{CPUs: 4, Memory: "8GiB"}}
+	spec := Spec{Modules: mods(ModuleSpec{Name: "node"}, ModuleSpec{Name: "claude"}), Resources: Resources{CPUs: 4, Memory: "8GiB"}}
 	r, err := Resolve(flags, spec, env)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.Modules) != 1 || r.Modules[0] != "go" {
+	if len(r.Modules) != 1 || r.Modules[0].Name != "go" || r.Modules[0].Version != DefaultToolVersion {
 		t.Errorf("modules = %v (flag should win)", r.Modules)
 	}
 	if r.Resources.CPUs != 8 {
@@ -38,7 +38,7 @@ func TestResolveDefaultModulesOnlyWhenAbsent(t *testing.T) {
 		t.Errorf("modules = %v, want DefaultModules %v", r.Modules, DefaultModules)
 	}
 	// Explicit empty list → base only, NOT defaults.
-	r2, _ := Resolve(Flags{}, Spec{Modules: strs()}, env)
+	r2, _ := Resolve(Flags{}, Spec{Modules: mods()}, env)
 	if len(r2.Modules) != 0 {
 		t.Errorf("explicit empty modules should stay empty, got %v", r2.Modules)
 	}
@@ -60,31 +60,25 @@ func TestResolveMountVsClone(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	known := func(m string) bool { return m == "node" || m == "go" }
-	bad := Spec{Modules: strs("node", "bogus")}
-	if err := bad.Validate(known); err == nil {
-		t.Error("want error for unknown module")
-	}
-	if err := (Spec{Resources: Resources{CPUs: 0, Memory: "16xb"}}).Validate(known); err == nil {
+	if err := (Spec{Resources: Resources{CPUs: 0, Memory: "16xb"}}).Validate(); err == nil {
 		t.Error("want error for bad memory")
 	}
-	if err := (Spec{Modules: strs("node"), Resources: Resources{Memory: "16GiB"}}).Validate(known); err != nil {
+	if err := (Spec{Modules: mods(ModuleSpec{Name: "node"}), Resources: Resources{Memory: "16GiB"}}).Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateMounts(t *testing.T) {
-	known := func(string) bool { return true }
-	if err := (Spec{Mounts: []MountSpec{{Path: ""}}}).Validate(known); err == nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: ""}}}).Validate(); err == nil {
 		t.Error("want error for empty mount path")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: "bad/name"}}}).Validate(known); err == nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: "bad/name"}}}).Validate(); err == nil {
 		t.Error("want error for name with a slash")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: ".."}}}).Validate(known); err == nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: ".."}}}).Validate(); err == nil {
 		t.Error("want error for name '..'")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x"}, {Path: "../y", Name: "ok-1"}}}).Validate(known); err != nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "../x"}, {Path: "../y", Name: "ok-1"}}}).Validate(); err != nil {
 		t.Errorf("unexpected error for valid mounts: %v", err)
 	}
 }
@@ -131,5 +125,53 @@ func TestResolveMountCollisionWithPrimary(t *testing.T) {
 	}
 	if _, err := Resolve(Flags{}, Spec{}, env); err == nil {
 		t.Error("want collision error against the primary workspace")
+	}
+}
+
+func TestValidateModules(t *testing.T) {
+	ok := []Spec{
+		{Modules: &[]ModuleSpec{{Name: "node", Version: "lts"}}},
+		{Modules: &[]ModuleSpec{{Name: "npm:@openai/codex"}}},
+		{Modules: &[]ModuleSpec{{Name: "aqua:owner/repo", Version: "1.2.3"}}},
+	}
+	for _, s := range ok {
+		if err := s.Validate(); err != nil {
+			t.Errorf("Validate(%+v) = %v, want nil", *s.Modules, err)
+		}
+	}
+	bad := []Spec{
+		{Modules: &[]ModuleSpec{{Name: ""}}},
+		{Modules: &[]ModuleSpec{{Name: "no spaces"}}},
+		{Modules: &[]ModuleSpec{{Name: "node", Version: "1 2"}}},
+		{Modules: &[]ModuleSpec{{Name: "node"}, {Name: "node", Version: "22"}}},
+	}
+	for _, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%+v) = nil, want an error", *s.Modules)
+		}
+	}
+}
+
+func TestResolveFillsDefaultVersion(t *testing.T) {
+	spec := Spec{Modules: &[]ModuleSpec{{Name: "node"}, {Name: "go", Version: "1.24"}}}
+	r, err := Resolve(Flags{}, spec, Env{ProjectName: "p", GuestUser: "u", GuestHome: "/home/u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ModuleSpec{{Name: "node", Version: DefaultToolVersion}, {Name: "go", Version: "1.24"}}
+	if len(r.Modules) != 2 || r.Modules[0] != want[0] || r.Modules[1] != want[1] {
+		t.Errorf("Modules = %+v, want %+v", r.Modules, want)
+	}
+}
+
+func TestResolveModulesFromFlags(t *testing.T) {
+	f := Flags{Modules: []string{"node@lts", "go"}, ModulesSet: true}
+	r, err := Resolve(f, Spec{}, Env{ProjectName: "p", GuestUser: "u", GuestHome: "/home/u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ModuleSpec{{Name: "node", Version: "lts"}, {Name: "go", Version: DefaultToolVersion}}
+	if len(r.Modules) != 2 || r.Modules[0] != want[0] || r.Modules[1] != want[1] {
+		t.Errorf("Modules = %+v, want %+v", r.Modules, want)
 	}
 }

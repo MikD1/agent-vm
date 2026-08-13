@@ -65,11 +65,11 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	// Phase 3 — feature modules in spec order.
 	needsRestart := false
 	for _, m := range r.Modules {
-		fmt.Printf("==> Phase 3: module — %s\n", m)
-		if err := p.provisionModule(ctx, r, m); err != nil {
-			return fmt.Errorf("phase 3 (%s): %w", m, err)
+		fmt.Printf("==> Phase 3: module — %s\n", m.Name)
+		if err := p.provisionModule(ctx, r, m.Name); err != nil {
+			return fmt.Errorf("phase 3 (%s): %w", m.Name, err)
 		}
-		if m == "docker" {
+		if m.Name == "docker" {
 			needsRestart = true
 		}
 	}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func writeTemp(t *testing.T, content string) string {
@@ -21,7 +23,7 @@ func TestLoadFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Modules == nil || len(*s.Modules) != 2 || (*s.Modules)[0] != "node" {
+	if s.Modules == nil || len(*s.Modules) != 2 || (*s.Modules)[0].Name != "node" {
 		t.Errorf("modules = %v", s.Modules)
 	}
 	if s.Resources.CPUs != 8 || s.Resources.Memory != "16GiB" || s.Resources.Disk != "200GiB" {
@@ -79,5 +81,71 @@ func TestLoadNoMounts(t *testing.T) {
 	}
 	if s.Mounts != nil {
 		t.Errorf("absent mounts should be nil, got %+v", s.Mounts)
+	}
+}
+
+func TestModuleSpecForms(t *testing.T) {
+	const y = `
+modules:
+  - node
+  - go: "1.24"
+  - python: 3.12
+  - "npm:@openai/codex"
+`
+	var s Spec
+	if err := yaml.Unmarshal([]byte(y), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Modules == nil {
+		t.Fatal("modules is nil")
+	}
+	want := []ModuleSpec{
+		{Name: "node"},
+		{Name: "go", Version: "1.24"},
+		{Name: "python", Version: "3.12"}, // unquoted YAML number → string
+		{Name: "npm:@openai/codex"},
+	}
+	got := *s.Modules
+	if len(got) != len(want) {
+		t.Fatalf("got %d modules, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("modules[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestModuleSpecRoundTrip(t *testing.T) {
+	in := []ModuleSpec{{Name: "node", Version: "lts"}, {Name: "claude"}}
+	out, err := yaml.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != "- node: lts\n- claude\n" {
+		t.Fatalf("marshal = %q", out)
+	}
+	var back []ModuleSpec
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if len(back) != 2 || back[0] != in[0] || back[1] != in[1] {
+		t.Errorf("round trip = %+v, want %+v", back, in)
+	}
+}
+
+func TestParseModuleRef(t *testing.T) {
+	cases := map[string]ModuleSpec{
+		"node":                  {Name: "node"},
+		"node@lts":              {Name: "node", Version: "lts"},
+		"go@1.24":               {Name: "go", Version: "1.24"},
+		"npm:@openai/codex":     {Name: "npm:@openai/codex"},
+		"npm:@openai/codex@1.2": {Name: "npm:@openai/codex", Version: "1.2"},
+		"aqua:owner/repo":       {Name: "aqua:owner/repo"},
+	}
+	for in, want := range cases {
+		if got := ParseModuleRef(in); got != want {
+			t.Errorf("ParseModuleRef(%q) = %+v, want %+v", in, got, want)
+		}
 	}
 }

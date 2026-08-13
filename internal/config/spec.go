@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -44,6 +45,52 @@ func (m *MountSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
+// ModuleSpec is one tool in the Project Spec: a mise tool reference plus an
+// optional version. It accepts either a bare scalar (the name) or a single-key
+// mapping (name → version) — the same scalar-or-map shape MountSpec uses.
+type ModuleSpec struct {
+	Name    string
+	Version string
+}
+
+// UnmarshalYAML reads both accepted forms. Scalar values are taken from
+// node.Value rather than decoded, so an unquoted YAML number (`node: 22`) is
+// read as the string "22" instead of failing as an int.
+func (m *ModuleSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		m.Name = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode || len(node.Content) != 2 {
+		return fmt.Errorf("module entry must be a name or a single `name: version` pair")
+	}
+	key, val := node.Content[0], node.Content[1]
+	if key.Kind != yaml.ScalarNode || val.Kind != yaml.ScalarNode {
+		return fmt.Errorf("module entry must be a single `name: version` pair")
+	}
+	m.Name, m.Version = key.Value, val.Value
+	return nil
+}
+
+// MarshalYAML writes the compact form, so a VM Record round-trips as
+// `- node: lts` rather than as a two-key struct.
+func (m ModuleSpec) MarshalYAML() (any, error) {
+	if m.Version == "" {
+		return m.Name, nil
+	}
+	return map[string]string{m.Name: m.Version}, nil
+}
+
+// ParseModuleRef splits a --modules entry written in mise syntax (`node@lts`).
+// The split uses the last `@` only when it comes after the last `/`, so a scoped
+// npm package (`npm:@openai/codex`) is not mistaken for a version.
+func ParseModuleRef(s string) ModuleSpec {
+	if at := strings.LastIndex(s, "@"); at > 0 && at > strings.LastIndex(s, "/") {
+		return ModuleSpec{Name: s[:at], Version: s[at+1:]}
+	}
+	return ModuleSpec{Name: s}
+}
+
 // Workspace is the RESOLVED workspace (mode + paths). It lives in config so the
 // registry can reuse it; the Project Spec itself carries no workspace.
 type Workspace struct {
@@ -58,10 +105,10 @@ type Workspace struct {
 // so an absent key (nil → defaults may apply) is distinguishable from an explicit
 // empty list (base only).
 type Spec struct {
-	Modules   *[]string   `yaml:"modules,omitempty"`
-	Resources Resources   `yaml:"resources,omitempty"`
-	Base      Base        `yaml:"base,omitempty"`
-	Mounts    []MountSpec `yaml:"mounts,omitempty"`
+	Modules   *[]ModuleSpec `yaml:"modules,omitempty"`
+	Resources Resources     `yaml:"resources,omitempty"`
+	Base      Base          `yaml:"base,omitempty"`
+	Mounts    []MountSpec   `yaml:"mounts,omitempty"`
 }
 
 // Load parses a .agent-vm.yaml file into a Spec.

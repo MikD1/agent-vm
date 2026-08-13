@@ -9,7 +9,6 @@ import (
 
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/lima"
-	"github.com/MikD1/agent-vm/internal/modules"
 	"github.com/MikD1/agent-vm/internal/provision"
 	"github.com/MikD1/agent-vm/internal/registry"
 	"github.com/MikD1/agent-vm/internal/vmname"
@@ -118,8 +117,7 @@ func newCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			known := func(m string) bool { return modules.Exists(m, extDir) }
-			if err := spec.Validate(known); err != nil {
+			if err := spec.Validate(); err != nil {
 				return err
 			}
 

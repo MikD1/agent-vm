@@ -11,7 +11,10 @@ const (
 	DefaultRef    = "main"
 )
 
-// DefaultModules apply only when no module information exists anywhere
-// (clone from a bare repo with no in-repo spec). claude needs npm from node, so
-// node comes first.
-var DefaultModules = []string{"node", "claude"}
+// DefaultToolVersion is what a module named without a version resolves to.
+// Pinning is the documented practice; the `avm init` template pins Node.
+const DefaultToolVersion = "latest"
+
+// DefaultModules apply only when no module information exists anywhere (clone
+// from a bare repo with no in-repo spec).
+var DefaultModules = []ModuleSpec{{Name: "node", Version: "lts"}, {Name: "claude"}}

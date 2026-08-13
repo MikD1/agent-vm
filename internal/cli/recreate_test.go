@@ -13,7 +13,7 @@ func TestRecreateFromRecord(t *testing.T) {
 	store := registry.NewStore(t.TempDir())
 	rec := registry.Record{
 		Name: "my-api", User: "me",
-		Modules:   []string{"node"},
+		Modules:   []config.ModuleSpec{{Name: "node"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},

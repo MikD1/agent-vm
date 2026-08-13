@@ -7,9 +7,10 @@ import (
 )
 
 var (
-	sizeRe      = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
-	modRe       = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
-	mountNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	sizeRe       = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
+	moduleRefRe  = regexp.MustCompile(`^[a-zA-Z0-9_.-]+(:@?[a-zA-Z0-9_./-]+)?$`)
+	moduleVerRe  = regexp.MustCompile(`^[^\s"']+$`)
+	mountNameRe  = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 )
 
 // Flags are the create/init command-line overrides. ModulesSet records whether
@@ -56,7 +57,7 @@ type Env struct {
 type Resolved struct {
 	Name      string
 	Source    string // "cli" | "project"
-	Modules   []string
+	Modules   []ModuleSpec
 	Resources Resources
 	Base      Base
 	User      string
@@ -64,16 +65,23 @@ type Resolved struct {
 	Mounts    []Mount
 }
 
-// Validate checks a Spec in isolation. known reports whether a module name exists.
-func (s Spec) Validate(known func(string) bool) error {
+// Validate checks a Spec in isolation. Module names are mise tool references and
+// are not checked against a catalog: avm does not know the mise registry offline,
+// so an unknown name surfaces when mise runs.
+func (s Spec) Validate() error {
 	if s.Modules != nil {
+		seen := map[string]bool{}
 		for _, m := range *s.Modules {
-			if !modRe.MatchString(m) {
-				return fmt.Errorf("invalid module name %q", m)
+			if !moduleRefRe.MatchString(m.Name) {
+				return fmt.Errorf("invalid module name %q", m.Name)
 			}
-			if !known(m) {
-				return fmt.Errorf("unknown module %q", m)
+			if m.Version != "" && !moduleVerRe.MatchString(m.Version) {
+				return fmt.Errorf("invalid version %q for module %q", m.Version, m.Name)
 			}
+			if seen[m.Name] {
+				return fmt.Errorf("module %q listed twice", m.Name)
+			}
+			seen[m.Name] = true
 		}
 	}
 	if s.Resources.CPUs < 0 {
@@ -108,11 +116,20 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	// Modules: flag > spec key present > DefaultModules.
 	switch {
 	case flags.ModulesSet:
-		r.Modules = flags.Modules
+		r.Modules = make([]ModuleSpec, 0, len(flags.Modules))
+		for _, raw := range flags.Modules {
+			r.Modules = append(r.Modules, ParseModuleRef(raw))
+		}
 	case spec.Modules != nil:
-		r.Modules = *spec.Modules
+		r.Modules = append([]ModuleSpec(nil), *spec.Modules...)
 	default:
-		r.Modules = append([]string(nil), DefaultModules...)
+		r.Modules = append([]ModuleSpec(nil), DefaultModules...)
+	}
+	// A module named without a version installs the latest release.
+	for i := range r.Modules {
+		if r.Modules[i].Version == "" {
+			r.Modules[i].Version = DefaultToolVersion
+		}
 	}
 
 	// Resources: flag > spec > default.
