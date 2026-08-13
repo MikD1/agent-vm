@@ -134,6 +134,26 @@ func TestModuleSpecRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFileSpecForms(t *testing.T) {
+	const y = `
+files:
+  claude-settings.json: ~/.claude/settings.json
+  secrets/auth.json:
+    to: ~/.codex/auth.json
+    mode: "0600"
+`
+	var s Spec
+	if err := yaml.Unmarshal([]byte(y), &s); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Files["claude-settings.json"]; got != (FileSpec{To: "~/.claude/settings.json"}) {
+		t.Errorf("scalar form = %+v", got)
+	}
+	if got := s.Files["secrets/auth.json"]; got != (FileSpec{To: "~/.codex/auth.json", Mode: "0600"}) {
+		t.Errorf("map form = %+v", got)
+	}
+}
+
 func TestParseModuleRef(t *testing.T) {
 	cases := map[string]ModuleSpec{
 		"node":                  {Name: "node"},

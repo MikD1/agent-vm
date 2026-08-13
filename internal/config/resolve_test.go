@@ -88,9 +88,9 @@ func TestResolveMounts(t *testing.T) {
 		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux",
 		HostPath: "/Users/me/my-api",
 		Mounts: []MountInput{
-			{HostPath: "/Users/me/shared-lib"},                 // → ~/shared-lib
-			{HostPath: "/Users/me/tools/cli", Name: "cli-x"},   // name override → ~/cli-x
-			{HostPath: "/Users/me/shared-lib"},                 // duplicate host → deduped
+			{HostPath: "/Users/me/shared-lib"},               // → ~/shared-lib
+			{HostPath: "/Users/me/tools/cli", Name: "cli-x"}, // name override → ~/cli-x
+			{HostPath: "/Users/me/shared-lib"},               // duplicate host → deduped
 		},
 	}
 	r, err := Resolve(Flags{}, Spec{}, env)
@@ -161,6 +161,52 @@ func TestResolveFillsDefaultVersion(t *testing.T) {
 	want := []ModuleSpec{{Name: "node", Version: DefaultToolVersion}, {Name: "go", Version: "1.24"}}
 	if len(r.Modules) != 2 || r.Modules[0] != want[0] || r.Modules[1] != want[1] {
 		t.Errorf("Modules = %+v, want %+v", r.Modules, want)
+	}
+}
+
+func TestValidateFiles(t *testing.T) {
+	ok := Spec{Files: map[string]FileSpec{
+		"a.json": {To: "~/.a/a.json"},
+		"b.json": {To: "/etc/b.json", Mode: "0600"},
+	}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil", err)
+	}
+	bad := map[string]Spec{
+		"empty source":   {Files: map[string]FileSpec{"": {To: "~/x"}}},
+		"empty dest":     {Files: map[string]FileSpec{"a": {To: ""}}},
+		"relative dest":  {Files: map[string]FileSpec{"a": {To: "x/y"}}},
+		"dotdot in dest": {Files: map[string]FileSpec{"a": {To: "~/../x"}}},
+		"bad mode":       {Files: map[string]FileSpec{"a": {To: "~/x", Mode: "644"}}},
+		"non octal mode": {Files: map[string]FileSpec{"a": {To: "~/x", Mode: "0abc"}}},
+		"duplicate dest": {Files: map[string]FileSpec{"a": {To: "~/x"}, "b": {To: "~/x"}}},
+	}
+	for name, s := range bad {
+		if err := s.Validate(); err == nil {
+			t.Errorf("Validate(%s) = nil, want an error", name)
+		}
+	}
+}
+
+func TestResolveFiles(t *testing.T) {
+	env := Env{
+		ProjectName: "p", GuestUser: "u", GuestHome: "/home/u.linux",
+		Files: []FileInput{
+			{Root: RootSecrets, Rel: "codex-auth.json", To: "~/.codex/auth.json", Mode: "0600"},
+			{Root: RootWorkspace, Rel: "claude-settings.json", To: "~/.claude/settings.json"},
+		},
+	}
+	r, err := Resolve(Flags{}, Spec{}, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted by destination, and ~/ expanded against the guest home.
+	want := []FileCopy{
+		{Root: RootWorkspace, Rel: "claude-settings.json", To: "/home/u.linux/.claude/settings.json", Mode: DefaultFileMode},
+		{Root: RootSecrets, Rel: "codex-auth.json", To: "/home/u.linux/.codex/auth.json", Mode: "0600"},
+	}
+	if len(r.Files) != 2 || r.Files[0] != want[0] || r.Files[1] != want[1] {
+		t.Errorf("Files = %+v, want %+v", r.Files, want)
 	}
 }
 

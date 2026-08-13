@@ -91,6 +91,28 @@ func ParseModuleRef(s string) ModuleSpec {
 	return ModuleSpec{Name: s}
 }
 
+// FileSpec is the destination of one `files` entry. It accepts either a bare
+// scalar (the guest path) or a mapping {to, mode}.
+type FileSpec struct {
+	To   string `yaml:"to"`
+	Mode string `yaml:"mode,omitempty"`
+}
+
+// UnmarshalYAML lets a destination be written as a scalar path or a {to, mode} map.
+func (f *FileSpec) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		f.To = node.Value
+		return nil
+	}
+	type raw FileSpec // avoid recursing into this UnmarshalYAML
+	var r raw
+	if err := node.Decode(&r); err != nil {
+		return err
+	}
+	*f = FileSpec(r)
+	return nil
+}
+
 // Workspace is the RESOLVED workspace (mode + paths). It lives in config so the
 // registry can reuse it; the Project Spec itself carries no workspace.
 type Workspace struct {
@@ -105,10 +127,11 @@ type Workspace struct {
 // so an absent key (nil → defaults may apply) is distinguishable from an explicit
 // empty list (base only).
 type Spec struct {
-	Modules   *[]ModuleSpec `yaml:"modules,omitempty"`
-	Resources Resources     `yaml:"resources,omitempty"`
-	Base      Base          `yaml:"base,omitempty"`
-	Mounts    []MountSpec   `yaml:"mounts,omitempty"`
+	Modules   *[]ModuleSpec       `yaml:"modules,omitempty"`
+	Resources Resources           `yaml:"resources,omitempty"`
+	Base      Base                `yaml:"base,omitempty"`
+	Mounts    []MountSpec         `yaml:"mounts,omitempty"`
+	Files     map[string]FileSpec `yaml:"files,omitempty"`
 }
 
 // Load parses a .agent-vm.yaml file into a Spec.

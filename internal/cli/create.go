@@ -131,6 +131,11 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
+			fileInputs, err := resolveFileInputs(spec.Files, absDir, root)
+			if err != nil {
+				return err
+			}
+
 			env := config.Env{
 				ProjectName: projName,
 				GuestUser:   user,
@@ -138,6 +143,7 @@ func newCreateCmd() *cobra.Command {
 				HostPath:    hostPath,
 				SpecPresent: specPresent,
 				Mounts:      mountInputs,
+				Files:       fileInputs,
 			}
 			resolved, err := config.Resolve(f, spec, env)
 			if err != nil {

@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 var (
-	sizeRe       = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
-	moduleRefRe  = regexp.MustCompile(`^[a-zA-Z0-9_.-]+(:@?[a-zA-Z0-9_./-]+)?$`)
-	moduleVerRe  = regexp.MustCompile(`^[^\s"']+$`)
-	mountNameRe  = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	sizeRe      = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGT](iB|B)?$`)
+	moduleRefRe = regexp.MustCompile(`^[a-zA-Z0-9_.-]+(:@?[a-zA-Z0-9_./-]+)?$`)
+	moduleVerRe = regexp.MustCompile(`^[^\s"']+$`)
+	mountNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	fileModeRe  = regexp.MustCompile(`^0[0-7]{3}$`)
 )
 
 // Flags are the create/init command-line overrides. ModulesSet records whether
@@ -40,6 +43,37 @@ type MountInput struct {
 	Name     string
 }
 
+// FileRoot names which mounted directory a `files` source lives under. Sources
+// are copied inside the guest, so they must be visible there.
+type FileRoot string
+
+const (
+	// RootWorkspace is the project directory, mounted at VM_WORKSPACE.
+	RootWorkspace FileRoot = "workspace"
+	// RootSecrets is the host store ~/.config/agent-vm, mounted read-only at VM_SECRETS.
+	RootSecrets FileRoot = "secrets"
+)
+
+// FileInput is one `files` entry after the CLI has classified its root and
+// checked it exists. To is still in ~/ form; Resolve expands it.
+type FileInput struct {
+	Root  FileRoot
+	Rel   string
+	To    string
+	Mode  string
+	IsDir bool
+}
+
+// FileCopy is a resolved `files` entry: an absolute guest destination plus the
+// root and relative path the guest reconstructs its source from.
+type FileCopy struct {
+	Root  FileRoot `yaml:"root"`
+	Rel   string   `yaml:"rel"`
+	To    string   `yaml:"to"`
+	Mode  string   `yaml:"mode,omitempty"`
+	IsDir bool     `yaml:"isDir,omitempty"`
+}
+
 // Env carries facts resolved outside config: the normalized project/VM name, the
 // guest user/home (from `limactl info`), and—for mount mode—the host project path.
 // SpecPresent records whether a spec file was found (→ source "project").
@@ -50,6 +84,7 @@ type Env struct {
 	HostPath    string
 	SpecPresent bool
 	Mounts      []MountInput
+	Files       []FileInput
 }
 
 // Resolved is the materialized config: everything needed to build both the Lima
@@ -63,6 +98,7 @@ type Resolved struct {
 	User      string
 	Workspace Workspace
 	Mounts    []Mount
+	Files     []FileCopy
 }
 
 // Validate checks a Spec in isolation. Module names are mise tool references and
@@ -102,6 +138,28 @@ func (s Spec) Validate() error {
 				return fmt.Errorf("invalid mount name %q (use a single path segment)", m.Name)
 			}
 		}
+	}
+	dest := map[string]string{}
+	for src, f := range s.Files {
+		if src == "" {
+			return fmt.Errorf("files entry has an empty source path")
+		}
+		if f.To == "" {
+			return fmt.Errorf("files entry %q has an empty destination", src)
+		}
+		if !strings.HasPrefix(f.To, "/") && !strings.HasPrefix(f.To, "~/") {
+			return fmt.Errorf("files destination %q must be absolute or start with ~/", f.To)
+		}
+		if hasDotDot(f.To) {
+			return fmt.Errorf("files destination %q must not contain ..", f.To)
+		}
+		if f.Mode != "" && !fileModeRe.MatchString(f.Mode) {
+			return fmt.Errorf("invalid mode %q for %q (want four octal digits, e.g. 0600)", f.Mode, src)
+		}
+		if prev, clash := dest[f.To]; clash {
+			return fmt.Errorf("files conflict: %q and %q both write %s", src, prev, f.To)
+		}
+		dest[f.To] = src
 	}
 	return nil
 }
@@ -159,6 +217,7 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 		return Resolved{}, err
 	}
 	r.Mounts = mounts
+	r.Files = resolveFiles(env.Files, env.GuestHome)
 	return r, nil
 }
 
@@ -204,4 +263,34 @@ func resolveMounts(inputs []MountInput, guestHome, primaryGuest string) ([]Mount
 		out = append(out, Mount{HostPath: in.HostPath, GuestPath: guest})
 	}
 	return out, nil
+}
+
+// hasDotDot reports whether any path segment is "..".
+func hasDotDot(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveFiles expands ~/ destinations against the guest home, applies the
+// default mode, and sorts by destination so the generated script and the Record
+// are byte-stable.
+func resolveFiles(inputs []FileInput, guestHome string) []FileCopy {
+	out := make([]FileCopy, 0, len(inputs))
+	for _, in := range inputs {
+		to := in.To
+		if strings.HasPrefix(to, "~/") {
+			to = path.Join(guestHome, to[2:])
+		}
+		mode := in.Mode
+		if mode == "" && !in.IsDir {
+			mode = DefaultFileMode
+		}
+		out = append(out, FileCopy{Root: in.Root, Rel: in.Rel, To: to, Mode: mode, IsDir: in.IsDir})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].To < out[j].To })
+	return out
 }

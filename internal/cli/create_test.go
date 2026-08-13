@@ -106,3 +106,73 @@ func TestResolveMountInputsMissing(t *testing.T) {
 		t.Error("want error for a missing mount source")
 	}
 }
+
+func TestResolveFileInputs(t *testing.T) {
+	specDir := t.TempDir()
+	store := t.TempDir()
+	if err := os.WriteFile(filepath.Join(specDir, "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(specDir, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store, "auth.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := resolveFileInputs(map[string]config.FileSpec{
+		"settings.json":                   {To: "~/.claude/settings.json"},
+		"agents":                          {To: "~/.claude/agents"},
+		filepath.Join(store, "auth.json"): {To: "~/.codex/auth.json", Mode: "0600"},
+	}, specDir, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRel := map[string]config.FileInput{}
+	for _, in := range got {
+		byRel[in.Rel] = in
+	}
+	if in := byRel["settings.json"]; in.Root != config.RootWorkspace || in.IsDir {
+		t.Errorf("settings.json = %+v", in)
+	}
+	if in := byRel["agents"]; in.Root != config.RootWorkspace || !in.IsDir {
+		t.Errorf("agents = %+v", in)
+	}
+	if in := byRel["auth.json"]; in.Root != config.RootSecrets || in.Mode != "0600" {
+		t.Errorf("auth.json = %+v", in)
+	}
+}
+
+func TestResolveFileInputsRejects(t *testing.T) {
+	specDir := t.TempDir()
+	store := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "x.conf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(specDir, "dir.conf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A source neither in the project nor in the host store is invisible to the guest.
+	if _, err := resolveFileInputs(map[string]config.FileSpec{
+		filepath.Join(outside, "x.conf"): {To: "~/x.conf"},
+	}, specDir, store); err == nil {
+		t.Error("source outside both roots = nil error, want an error")
+	}
+	// A missing source is caught before the VM is created.
+	if _, err := resolveFileInputs(map[string]config.FileSpec{
+		"nope.json": {To: "~/nope.json"},
+	}, specDir, store); err == nil {
+		t.Error("missing source = nil error, want an error")
+	}
+	// mode is meaningless for a directory.
+	if err := os.MkdirAll(filepath.Join(specDir, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveFileInputs(map[string]config.FileSpec{
+		"d": {To: "~/d", Mode: "0600"},
+	}, specDir, store); err == nil {
+		t.Error("mode on a directory = nil error, want an error")
+	}
+}

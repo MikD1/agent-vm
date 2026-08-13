@@ -89,3 +89,63 @@ func resolveMountInputs(specMounts []config.MountSpec, flagMounts []string, spec
 	}
 	return out, nil
 }
+
+// resolveFileInputs turns Spec `files` entries into resolved inputs. Sources are
+// relative to the spec dir, or absolute/~-prefixed on the host; this is where the
+// filesystem is touched, keeping the config package pure.
+//
+// A source must sit under one of the two directories the guest can see — the
+// project dir (VM_WORKSPACE) or the host store (VM_SECRETS) — because the copy
+// runs inside the guest.
+func resolveFileInputs(specFiles map[string]config.FileSpec, specDir, storeRoot string) ([]config.FileInput, error) {
+	var out []config.FileInput
+	for src, f := range specFiles {
+		abs := src
+		if strings.HasPrefix(abs, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			abs = filepath.Join(home, abs[2:])
+		}
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(specDir, abs)
+		}
+		abs = filepath.Clean(abs)
+
+		fi, err := os.Stat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("files source %q: %w", src, err)
+		}
+
+		root, rel, err := classifyFileRoot(abs, specDir, storeRoot)
+		if err != nil {
+			return nil, err
+		}
+		if fi.IsDir() && f.Mode != "" {
+			return nil, fmt.Errorf("files source %q is a directory; remove `mode` (directories keep their own permissions)", src)
+		}
+		out = append(out, config.FileInput{
+			Root: root, Rel: rel, To: f.To, Mode: f.Mode, IsDir: fi.IsDir(),
+		})
+	}
+	return out, nil
+}
+
+// classifyFileRoot decides which mounted root a source belongs to and its path
+// relative to that root.
+func classifyFileRoot(abs, specDir, storeRoot string) (config.FileRoot, string, error) {
+	for _, c := range []struct {
+		root config.FileRoot
+		base string
+	}{
+		{config.RootWorkspace, filepath.Clean(specDir)},
+		{config.RootSecrets, filepath.Clean(storeRoot)},
+	} {
+		rel, err := filepath.Rel(c.base, abs)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return c.root, filepath.ToSlash(rel), nil
+		}
+	}
+	return "", "", fmt.Errorf("files source %q is outside both the project directory (%s) and the host store (%s); the guest cannot see it", abs, specDir, storeRoot)
+}
