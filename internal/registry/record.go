@@ -11,7 +11,6 @@ import (
 // Record is the host-local materialization of a Project Spec for one Lima VM.
 type Record struct {
 	Name      string              `yaml:"name"`
-	Source    string              `yaml:"source"` // "cli" | "project"
 	CreatedAt time.Time           `yaml:"createdAt"`
 	Base      config.Base         `yaml:"base"`
 	Modules   []config.ModuleSpec `yaml:"modules"`
@@ -20,7 +19,7 @@ type Record struct {
 	InstalledTools []config.ModuleSpec `yaml:"installedTools,omitempty"`
 	Resources      config.Resources    `yaml:"resources"`
 	User           string              `yaml:"user"`
-	Workspace      config.Workspace    `yaml:"workspace"`
+	Workspace      config.Mount        `yaml:"workspace"`
 	Mounts         []config.Mount      `yaml:"mounts,omitempty"`
 	Files          []config.FileCopy   `yaml:"files,omitempty"`
 	Scripts        []string            `yaml:"scripts,omitempty"`
@@ -30,7 +29,6 @@ type Record struct {
 func FromResolved(r config.Resolved, createdAt time.Time) Record {
 	return Record{
 		Name:      r.Name,
-		Source:    r.Source,
 		CreatedAt: createdAt,
 		Base:      r.Base,
 		Modules:   r.Modules,

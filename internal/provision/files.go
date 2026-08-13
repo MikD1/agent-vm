@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"path"
+	"strings"
 
 	"github.com/MikD1/agent-vm/internal/config"
 )
 
-// renderFileCopies is the phase 5 script: copy each declared file out of a mount
+// renderFileCopies is the phase 4 script: copy each declared file out of a mount
 // and into its destination, owned by the VM user. Sources are addressed through
 // the env contract (VM_WORKSPACE, VM_SECRETS) rather than through host paths, so
 // the same entries work on any machine that has the project checked out.
@@ -51,4 +52,10 @@ func renderFileCopies(files []config.FileCopy) []byte {
 		}
 	}
 	return b.Bytes()
+}
+
+// shellQuote wraps s in single quotes and escapes any embedded single quotes,
+// producing a bash-safe argument regardless of the string's content.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

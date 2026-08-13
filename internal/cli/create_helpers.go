@@ -19,37 +19,26 @@ func osUsername() string {
 	return "user"
 }
 
-// projectName derives the VM name: for clone mode, from the repo basename;
-// otherwise from the directory basename.
-func projectName(f config.Flags, dir string) (string, error) {
-	if f.Repo != "" {
-		return vmname.Normalize(repoBasename(f.Repo))
-	}
+// projectName derives the VM name from the project directory's basename.
+func projectName(dir string) (string, error) {
 	return vmname.Normalize(filepath.Base(dir))
 }
 
-func repoBasename(repo string) string {
-	return strings.TrimSuffix(filepath.Base(repo), ".git")
-}
-
-// loadSpecForCreate loads the in-repo spec for mount mode (required).
-// Clone mode returns an empty spec (flags drive config).
-func loadSpecForCreate(f config.Flags, dir string) (config.Spec, bool, string, error) {
-	if f.Repo != "" {
-		return config.Spec{}, false, "", nil
-	}
+// loadSpecForCreate loads the project's `.agent-vm.yaml`, which is required, and
+// returns it together with the host path of the project directory.
+func loadSpecForCreate(dir string) (config.Spec, string, error) {
 	specPath := filepath.Join(dir, ".agent-vm.yaml")
 	if _, err := os.Stat(specPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return config.Spec{}, false, "", errSpecRequired(dir)
+			return config.Spec{}, "", errSpecRequired(dir)
 		}
-		return config.Spec{}, false, "", err
+		return config.Spec{}, "", err
 	}
 	s, err := config.Load(specPath)
 	if err != nil {
-		return config.Spec{}, false, "", err
+		return config.Spec{}, "", err
 	}
-	return s, true, dir, nil
+	return s, dir, nil
 }
 
 func errSpecRequired(dir string) error {

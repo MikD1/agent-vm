@@ -21,13 +21,11 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 	doc["user"] = map[string]string{"name": r.User, "home": guestHome}
 
 	mounts, _ := doc["mounts"].([]any)
-	if r.Workspace.Mode == config.ModeMount {
-		mounts = append(mounts, map[string]any{
-			"location":   r.Workspace.HostPath,
-			"mountPoint": r.Workspace.GuestPath,
-			"writable":   true,
-		})
-	}
+	mounts = append(mounts, map[string]any{
+		"location":   r.Workspace.HostPath,
+		"mountPoint": r.Workspace.GuestPath,
+		"writable":   true,
+	})
 	for _, m := range r.Mounts {
 		mounts = append(mounts, map[string]any{
 			"location":   m.HostPath,
@@ -36,13 +34,6 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 		})
 	}
 	doc["mounts"] = mounts
-
-	ssh, _ := doc["ssh"].(map[string]any)
-	if ssh == nil {
-		ssh = map[string]any{}
-	}
-	ssh["forwardAgent"] = r.Workspace.Mode == config.ModeClone
-	doc["ssh"] = ssh
 
 	return yaml.Marshal(doc)
 }

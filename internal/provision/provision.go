@@ -1,12 +1,11 @@
 // Package provision drives the fixed phase sequence (create/start → system →
-// platform → tools → workspace → restart) via a lima.Client.
+// platform → tools → files → scripts → restart) via a lima.Client.
 package provision
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/lima"
@@ -98,55 +97,33 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 		fmt.Printf("Warning: could not read back installed tool versions: %v\n", err)
 		p.installed = nil
 	}
-	// Phase 4 — workspace (clone only; mount is already present via virtiofs).
-	if r.Workspace.Mode == config.ModeClone {
-		fmt.Printf("==> Phase 4: cloning workspace\n")
-		if err := p.cloneWorkspace(ctx, r); err != nil {
-			return fmt.Errorf("phase 4 (clone): %w", err)
-		}
-	}
-	// Phase 5 — configuration files, copied out of the mounts.
+	// Phase 4 — configuration files, copied out of the mounts.
 	if script := renderFileCopies(r.Files); len(script) > 0 {
-		fmt.Printf("==> Phase 5: writing %d config file(s)\n", len(r.Files))
+		fmt.Printf("==> Phase 4: writing %d config file(s)\n", len(r.Files))
 		if err := p.lima.Provision(ctx, r.Name, script, p.env(r)); err != nil {
-			return fmt.Errorf("phase 5 (files): %w", err)
+			return fmt.Errorf("phase 4 (files): %w", err)
 		}
 	}
-	// Phase 6 — user scripts, in spec order. Contents are piped in, so a script
+	// Phase 5 — user scripts, in spec order. Contents are piped in, so a script
 	// need not live under a mount. Root runs them with the same env contract the
 	// platform scripts get; to call a mise-installed tool, a script drops to the
 	// VM user's login shell (`sudo -u "$VM_USER" -H bash -lc '...'`), because
 	// root's PATH carries no shims during provisioning.
 	for _, sp := range r.Scripts {
-		fmt.Printf("==> Phase 6: script — %s\n", sp)
+		fmt.Printf("==> Phase 5: script — %s\n", sp)
 		body, err := os.ReadFile(sp)
 		if err != nil {
-			return fmt.Errorf("phase 6 (%s): %w", sp, err)
+			return fmt.Errorf("phase 5 (%s): %w", sp, err)
 		}
 		if err := p.lima.Provision(ctx, r.Name, body, p.env(r)); err != nil {
-			return fmt.Errorf("phase 6 (%s): %w", sp, err)
+			return fmt.Errorf("phase 5 (%s): %w", sp, err)
 		}
 	}
-	// Phase 7 — restart, always. It applies group membership (docker),
+	// Phase 6 — restart, always. It applies group membership (docker),
 	// /etc/environment, and anything the guest changed that a live session holds.
-	fmt.Printf("==> Phase 7: restarting VM to apply provisioning\n")
+	fmt.Printf("==> Phase 6: restarting VM to apply provisioning\n")
 	if err := p.lima.Restart(ctx, r.Name); err != nil {
-		return fmt.Errorf("phase 7 (restart): %w", err)
+		return fmt.Errorf("phase 6 (restart): %w", err)
 	}
 	return nil
-}
-
-// cloneWorkspace runs `git clone` inside the guest as the VM user via the
-// forwarded SSH agent.
-func (p *Provisioner) cloneWorkspace(ctx context.Context, r config.Resolved) error {
-	script := fmt.Sprintf("sudo -u %s -H git clone --branch %s %s %s",
-		shellQuote(r.User), shellQuote(r.Workspace.Ref),
-		shellQuote(r.Workspace.Repo), shellQuote(r.Workspace.GuestPath))
-	return p.lima.Provision(ctx, r.Name, []byte(script), p.env(r))
-}
-
-// shellQuote wraps s in single quotes and escapes any embedded single quotes,
-// producing a bash-safe argument regardless of the string's content.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

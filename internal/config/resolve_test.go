@@ -5,7 +5,7 @@ import "testing"
 func mods(v ...ModuleSpec) *[]ModuleSpec { return &v }
 
 func TestResolvePrecedence(t *testing.T) {
-	env := Env{ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", SpecPresent: true}
+	env := Env{ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux"}
 	// flag modules override spec modules; flag cpus override spec cpus.
 	flags := Flags{Modules: []string{"go"}, ModulesSet: true, CPUs: 8}
 	spec := Spec{Modules: mods(ModuleSpec{Name: "node"}, ModuleSpec{Name: "claude"}), Resources: Resources{CPUs: 4, Memory: "8GiB"}}
@@ -44,18 +44,17 @@ func TestResolveDefaultModulesOnlyWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestResolveMountVsClone(t *testing.T) {
+func TestResolveWorkspace(t *testing.T) {
 	env := Env{ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api"}
-	mount, _ := Resolve(Flags{}, Spec{}, env)
-	if mount.Workspace.Mode != "mount" || mount.Workspace.HostPath != "/Users/me/my-api" {
-		t.Errorf("mount workspace = %+v", mount.Workspace)
+	r, err := Resolve(Flags{}, Spec{}, env)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if mount.Workspace.GuestPath != "/home/me.linux/my-api" {
-		t.Errorf("guestPath = %q", mount.Workspace.GuestPath)
+	if r.Workspace.HostPath != "/Users/me/my-api" {
+		t.Errorf("hostPath = %q", r.Workspace.HostPath)
 	}
-	clone, _ := Resolve(Flags{Repo: "git@h:acme/my-api.git", Ref: "main"}, Spec{}, env)
-	if clone.Workspace.Mode != "clone" || clone.Workspace.Repo == "" || clone.Workspace.Ref != "main" {
-		t.Errorf("clone workspace = %+v", clone.Workspace)
+	if r.Workspace.GuestPath != "/home/me.linux/my-api" {
+		t.Errorf("guestPath = %q", r.Workspace.GuestPath)
 	}
 }
 

@@ -25,11 +25,10 @@ type Flags struct {
 	Memory     string
 	Disk       string
 	BaseImage  string
-	Repo       string
-	Ref        string
 }
 
-// Mount is a resolved additional mount: absolute host + guest paths (materialization).
+// Mount is a resolved host→guest folder mapping (materialization): the primary
+// project workspace, or one additional host folder.
 type Mount struct {
 	HostPath  string `yaml:"hostPath"`
 	GuestPath string `yaml:"guestPath"`
@@ -75,14 +74,12 @@ type FileCopy struct {
 }
 
 // Env carries facts resolved outside config: the normalized project/VM name, the
-// guest user/home (from `limactl info`), and—for mount mode—the host project path.
-// SpecPresent records whether a spec file was found (→ source "project").
+// guest user/home (from `limactl info`), and the host project path.
 type Env struct {
 	ProjectName string
 	GuestUser   string
 	GuestHome   string
 	HostPath    string
-	SpecPresent bool
 	Mounts      []MountInput
 	Files       []FileInput
 	Scripts     []string
@@ -92,12 +89,11 @@ type Env struct {
 // template and the VM Record.
 type Resolved struct {
 	Name      string
-	Source    string // "cli" | "project"
 	Modules   []ModuleSpec
 	Resources Resources
 	Base      Base
 	User      string
-	Workspace Workspace
+	Workspace Mount
 	Mounts    []Mount
 	Files     []FileCopy
 	Scripts   []string
@@ -206,22 +202,7 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	r.Resources.Disk = firstStr(flags.Disk, spec.Resources.Disk, DefaultDisk)
 	r.Base.Image = firstStr(flags.BaseImage, spec.Base.Image, DefaultImage)
 
-	if env.SpecPresent {
-		r.Source = "project"
-	} else {
-		r.Source = "cli"
-	}
-
-	guestPath := path.Join(env.GuestHome, env.ProjectName)
-	if flags.Repo != "" {
-		ref := flags.Ref
-		if ref == "" {
-			ref = DefaultRef
-		}
-		r.Workspace = Workspace{Mode: ModeClone, GuestPath: guestPath, Repo: flags.Repo, Ref: ref}
-	} else {
-		r.Workspace = Workspace{Mode: ModeMount, GuestPath: guestPath, HostPath: env.HostPath}
-	}
+	r.Workspace = Mount{HostPath: env.HostPath, GuestPath: path.Join(env.GuestHome, env.ProjectName)}
 	mounts, err := resolveMounts(env.Mounts, env.GuestHome, r.Workspace.GuestPath)
 	if err != nil {
 		return Resolved{}, err

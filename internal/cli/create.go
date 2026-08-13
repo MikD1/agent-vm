@@ -79,7 +79,7 @@ func newCreateCmd() *cobra.Command {
 	var mountFlags []string
 	cmd := &cobra.Command{
 		Use:   "create [path]",
-		Short: "Create and start a VM (mount mode; --repo for clone mode)",
+		Short: "Create and start a VM from a project directory",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -99,7 +99,7 @@ func newCreateCmd() *cobra.Command {
 
 			limaClient := newLimaClient(cmd)
 
-			projName, err := projectName(f, absDir)
+			projName, err := projectName(absDir)
 			if err != nil {
 				return err
 			}
@@ -118,7 +118,7 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
-			spec, specPresent, hostPath, err := loadSpecForCreate(f, absDir)
+			spec, hostPath, err := loadSpecForCreate(absDir)
 			if err != nil {
 				return err
 			}
@@ -146,7 +146,6 @@ func newCreateCmd() *cobra.Command {
 				GuestUser:   user,
 				GuestHome:   home,
 				HostPath:    hostPath,
-				SpecPresent: specPresent,
 				Mounts:      mountInputs,
 				Files:       fileInputs,
 				Scripts:     scriptInputs,
@@ -172,8 +171,6 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.Memory, "memory", "", "override memory (e.g. 16GiB)")
 	cmd.Flags().StringVar(&f.Disk, "disk", "", "override disk (e.g. 200GiB)")
 	cmd.Flags().StringVar(&f.BaseImage, "base-image", "", "override base image")
-	cmd.Flags().StringVar(&f.Repo, "repo", "", "clone mode: git repo URL")
-	cmd.Flags().StringVar(&f.Ref, "ref", "", "clone mode: git ref (default main)")
 	cmd.Flags().StringArrayVar(&mountFlags, "mount", nil, "additional host folder to mount (repeatable)")
 	return cmd
 }

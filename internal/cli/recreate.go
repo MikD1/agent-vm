@@ -28,7 +28,7 @@ func recordToResolved(rec registry.Record) config.Resolved {
 		}
 	}
 	return config.Resolved{
-		Name: rec.Name, Source: rec.Source, User: rec.User,
+		Name: rec.Name, User: rec.User,
 		Modules: modules, Resources: rec.Resources, Base: rec.Base,
 		Workspace: rec.Workspace, Mounts: rec.Mounts, Files: rec.Files, Scripts: rec.Scripts,
 	}
@@ -90,7 +90,7 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 func newRecreateCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "recreate <name>",
-		Short: "Pristine rebuild of a VM from its record (clone mode re-clones — commit & push first)",
+		Short: "Pristine rebuild of a VM from its record (anything living only inside the guest is lost)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()

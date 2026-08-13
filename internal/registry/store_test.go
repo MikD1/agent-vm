@@ -10,13 +10,12 @@ import (
 func sampleRecord() Record {
 	return Record{
 		Name:      "my-api",
-		Source:    "cli",
 		CreatedAt: time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC),
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		Modules:   []config.ModuleSpec{{Name: "node"}, {Name: "claude"}},
 		Resources: config.Resources{CPUs: 4, Memory: "8GiB", Disk: "120GiB"},
 		User:      "me",
-		Workspace: config.Workspace{Mode: "clone", GuestPath: "/home/me.linux/my-api", Repo: "git@h:acme/my-api.git", Ref: "main"},
+		Workspace: config.Mount{HostPath: "/Users/me/my-api", GuestPath: "/home/me.linux/my-api"},
 	}
 }
 
@@ -34,7 +33,7 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != rec.Name || got.Workspace.Repo != rec.Workspace.Repo || got.Modules[1].Name != "claude" {
+	if got.Name != rec.Name || got.Workspace.HostPath != rec.Workspace.HostPath || got.Modules[1].Name != "claude" {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 }

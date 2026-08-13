@@ -130,14 +130,15 @@ layer and fans out to `{config, registry, provision, lima, templates, vmname}`;
   Do not "simplify" it to `[]ModuleSpec`. Each `ModuleSpec` is a mise tool reference (name
   + optional version) accepting either a bare scalar (`- claude`) or a single-key mapping
   (`- node: lts`) in YAML, or `name@version` (`node@lts`) on the `--modules` flag via
-  `ParseModuleRef`. The Spec carries **no** workspace mode — that's decided by the
-  presence of `--repo` at create time and recorded only in the Record.
+  `ParseModuleRef`. The Spec carries **no** workspace paths — the host path is the
+  directory `avm create` runs in, and both it and the derived guest path are recorded
+  only in the Record.
 - **`config.Resolved`** (`internal/config/resolve.go`) — the bridge produced by
   `config.Resolve`. Both the Lima config and the Record are built from it.
 - **`registry.Record`** (`internal/registry/record.go`) — the host-local materialization
-  of one VM (resolved spec + create-time facts: `Source`, `CreatedAt`, `User`,
-  `Workspace`). Build it **only** via `registry.FromResolved(resolved, now)`; never
-  hand-construct a Record or duplicate resolution logic.
+  of one VM (resolved spec + create-time facts: `CreatedAt`, `User`, `Workspace`). Build
+  it **only** via `registry.FromResolved(resolved, now)`; never hand-construct a Record
+  or duplicate resolution logic.
 
 ### Config resolution order
 
@@ -196,12 +197,11 @@ The full phase sequence, driven from `Provisioner.Run` (`internal/provision/prov
    the resolved config's `Modules []config.ModuleSpec`, followed by `mise ls -i -J` to
    read back what mise actually resolved (for the Record's `installedTools`; see §4's
    `guestScript` note — this is Go-rendered, not an embedded script).
-5. **Phase 4** — workspace: `git clone` for clone mode, a no-op for mount mode (virtiofs).
-6. **Phase 5** — config files: copy each `files` entry from its mount to its destination.
-7. **Phase 6** — user scripts, in spec order (arbitrary bash a project supplies via
+5. **Phase 4** — config files: copy each `files` entry from its mount to its destination.
+6. **Phase 5** — user scripts, in spec order (arbitrary bash a project supplies via
    `scripts:` in `.agent-vm.yaml` — not to be confused with the embedded platform
    scripts this section is about).
-8. **Phase 7** — restart, unconditionally.
+7. **Phase 6** — restart, unconditionally.
 
 Adding support for a new *tool* needs no script at all — see §7.A. This section's rules
 apply to the four embedded **platform** scripts (`system.sh`, `base.sh`, `docker.sh`,
@@ -233,7 +233,7 @@ redundant (about half the existing scripts include it for clarity; both styles a
 |----------|-------|-----|
 | `VM_USER` | unprivileged guest user | `sudo -u "$VM_USER" -H …`, `usermod` |
 | `VM_PROJECT` | project / VM name | labels, naming |
-| `VM_WORKSPACE` | absolute path to code in the guest | mount point or clone dir |
+| `VM_WORKSPACE` | absolute path to code in the guest | mount point of the host project dir |
 | `VM_SECRETS` | `/mnt/host/agent-vm` (**read-only** virtiofs) | `files` entries anchored under `~/.config/agent-vm/`; `base.sh` reads a sanitized `.gitconfig` from here |
 
 Do not invent new contract vars and do not read anything outside `$VM_SECRETS`. There is
@@ -331,7 +331,7 @@ of the project's tool selection) is the actual analog of the old "add a module" 
    into the Phase 2 platform loop (`{"base", …}, {"docker", …}, {"mise", …}`), in the
    order it must run.
 3. If it needs a **VM restart** to take effect (currently `docker`, for group
-   membership, and the unconditional Phase 7 restart already covers this — a new
+   membership, and the unconditional Phase 6 restart already covers this — a new
    platform step should not need its own restart logic).
 4. Extend `internal/provision/scripts_test.go`'s `TestGuestScriptsPresent` name list so
    the new script's shebang/`set -euo pipefail` header is checked.
@@ -407,7 +407,7 @@ type(scope): imperative subject
   changes now.)
 
 Examples from history:
-- `feat(cli): avm create (mount + clone, Record-first, rollback to OrphanedRecord)`
+- `feat(cli): show additional mount count in avm list`
 - `feat(provision): scripts section for user provisioning`
 - `docs(architecture): sync with implemented design`
 
@@ -454,8 +454,8 @@ git log --oneline origin/main..HEAD
 
 - Each project runs in its own VM; secrets are mounted **read-only** from the host at
   `/mnt/host/agent-vm`.
-- Git credentials stay on the host: mount mode keeps push/pull on the host; clone mode
-  uses **SSH agent forwarding enabled per clone-mode VM only** — keys never leave the host.
+- Git credentials stay on the host: commit/diff/branch happen inside the VM, push/pull
+  on the host — no keys or tokens are copied into the guest.
 - The certificate model is centralized in Phase 1 (`system.sh`); modules stay unaware of
   trust (§5). Don't reintroduce per-module cert handling.
 

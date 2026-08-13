@@ -38,11 +38,11 @@ func TestCreateRecordFirstThenRollback(t *testing.T) {
 		store: store,
 	}
 	r := config.Resolved{
-		Name: "my-api", Source: "cli", User: "me",
+		Name: "my-api", User: "me",
 		Modules:   []config.ModuleSpec{{Name: "node"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
-		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
 	}
 	err := runCreate(context.Background(), deps, r, "/home/me", nowFixed(), false)
 	if err == nil {
@@ -63,7 +63,7 @@ func TestCreateRefusesExistingRecord(t *testing.T) {
 	store := registry.NewStore(root)
 	_ = store.Write(registry.Record{Name: "my-api"})
 	deps := createDeps{lima: lima.New(&failRunner{}), store: store}
-	r := config.Resolved{Name: "my-api", Workspace: config.Workspace{Mode: "mount"}}
+	r := config.Resolved{Name: "my-api", Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"}}
 	if err := runCreate(context.Background(), deps, r, "/home/me", nowFixed(), false); err == nil {
 		t.Error("create must refuse when a Record already exists")
 	}
@@ -161,6 +161,20 @@ func TestResolveScriptInputs(t *testing.T) {
 	}
 	if _, err := resolveScriptInputs([]string{"nope.sh"}, specDir); err == nil {
 		t.Error("missing script = nil error, want an error")
+	}
+}
+
+// TestCreateCmdWorkspaceFlags pins the create surface: the workspace comes from
+// the project directory, so no flag may introduce another source for it.
+func TestCreateCmdWorkspaceFlags(t *testing.T) {
+	cmd := newCreateCmd()
+	for _, name := range []string{"repo", "ref"} {
+		if f := cmd.Flags().Lookup(name); f != nil {
+			t.Errorf("create must not define a --%s flag, got %q", name, f.Usage)
+		}
+	}
+	if err := cmd.Flags().Parse([]string{"--repo=git@h:a/b.git"}); err == nil {
+		t.Error("--repo must be rejected as an unknown flag")
 	}
 }
 

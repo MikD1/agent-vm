@@ -30,21 +30,21 @@ func ops(r *recorder) []string {
 	return out
 }
 
-func mountResolved() config.Resolved {
+func baseResolved() config.Resolved {
 	return config.Resolved{
 		Name:      "my-api",
 		Modules:   []config.ModuleSpec{{Name: "node", Version: "lts"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		User:      "me",
-		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me.linux/my-api", HostPath: "/h/my-api"},
+		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me.linux/my-api"},
 	}
 }
 
-func TestPlanMountOrder(t *testing.T) {
+func TestPlanPhaseOrder(t *testing.T) {
 	rec := &recorder{}
 	p := New(lima.New(rec), false)
-	if err := p.Run(context.Background(), mountResolved(), "/tmp/cfg.yaml"); err != nil {
+	if err := p.Run(context.Background(), baseResolved(), "/tmp/cfg.yaml"); err != nil {
 		t.Fatal(err)
 	}
 	// create, start, 4 platform provisions (system, base, docker, mise),
@@ -58,7 +58,7 @@ func TestPlanMountOrder(t *testing.T) {
 func TestPlanRestartsWithoutDocker(t *testing.T) {
 	// Docker is platform, not a module: the restart no longer depends on modules.
 	rec := &recorder{}
-	r := mountResolved()
+	r := baseResolved()
 	r.Modules = nil
 	p := New(lima.New(rec), false)
 	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
@@ -70,24 +70,9 @@ func TestPlanRestartsWithoutDocker(t *testing.T) {
 	}
 }
 
-func TestPlanCloneAddsClonePhase(t *testing.T) {
-	rec := &recorder{}
-	r := mountResolved()
-	r.Workspace = config.Workspace{Mode: "clone", GuestPath: "/home/me.linux/my-api", Repo: "git@h:a/b.git", Ref: "main"}
-	p := New(lima.New(rec), false)
-	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
-		t.Fatal(err)
-	}
-	// One more shell than the mount case: the clone.
-	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
-	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Errorf("ops = %v, want %v", got, want)
-	}
-}
-
 func TestPlanFilesPhase(t *testing.T) {
 	rec := &recorder{}
-	r := mountResolved()
+	r := baseResolved()
 	r.Files = []config.FileCopy{
 		{Root: config.RootWorkspace, Rel: "settings.json", To: "/home/me.linux/.claude/settings.json", Mode: "0644"},
 	}
@@ -109,10 +94,10 @@ func TestPlanFilesPhase(t *testing.T) {
 func TestPlanSkipsEmptyFilesPhase(t *testing.T) {
 	rec := &recorder{}
 	p := New(lima.New(rec), false)
-	if err := p.Run(context.Background(), mountResolved(), "/tmp/cfg.yaml"); err != nil {
+	if err := p.Run(context.Background(), baseResolved(), "/tmp/cfg.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	// Same op count as Task 5's mount case: no extra shell for an empty files list.
+	// Same op count as the base case: no extra shell for an empty files list.
 	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
 	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("ops = %v, want %v", got, want)
@@ -130,7 +115,7 @@ func TestPlanScriptsPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &recorder{}
-	r := mountResolved()
+	r := baseResolved()
 	r.Scripts = []string{first, second}
 	p := New(lima.New(rec), false)
 	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
@@ -147,11 +132,16 @@ func TestPlanScriptsPhase(t *testing.T) {
 
 func TestPlanScriptsPhaseMissingFile(t *testing.T) {
 	rec := &recorder{}
-	r := mountResolved()
+	r := baseResolved()
 	r.Scripts = []string{filepath.Join(t.TempDir(), "gone.sh")}
 	p := New(lima.New(rec), false)
-	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err == nil {
-		t.Error("missing script = nil error, want an error")
+	err := p.Run(context.Background(), r, "/tmp/cfg.yaml")
+	if err == nil {
+		t.Fatal("missing script = nil error, want an error")
+	}
+	// User scripts are phase 5: config files are 4, the restart is 6.
+	if !strings.Contains(err.Error(), "phase 5 (") {
+		t.Errorf("error = %q, want it to name phase 5", err)
 	}
 }
 
@@ -180,7 +170,7 @@ func (r *miseLsFailRunner) Run(ctx context.Context, stdin []byte, args ...string
 func TestPlanSurvivesBrokenMiseListReadback(t *testing.T) {
 	r := &miseLsFailRunner{}
 	p := New(lima.New(r), false)
-	if err := p.Run(context.Background(), mountResolved(), "/tmp/cfg.yaml"); err != nil {
+	if err := p.Run(context.Background(), baseResolved(), "/tmp/cfg.yaml"); err != nil {
 		t.Fatalf("Run() = %v, want nil (mise ls failure must be non-fatal)", err)
 	}
 	if got := p.InstalledTools(); len(got) != 0 {

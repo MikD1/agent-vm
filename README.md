@@ -190,8 +190,8 @@ sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
    create/start/shell/delete VMs.
 3. **Bash provisioning** runs inside the guest in a fixed phase sequence: system
    layer (certificates, trust) → platform (apt packages, Docker, mise) → tools
-   (one `mise install`) → workspace → config files → user scripts → restart. Only
-   the tools phase depends on the project; everything else is the same on every VM.
+   (one `mise install`) → config files → user scripts → restart. Only the tools
+   phase depends on the project; everything else is the same on every VM.
 
 ### Two config artifacts
 
@@ -213,11 +213,10 @@ Phase 1  system layer — install host CA certs into the trust store, export tru
 Phase 2  platform — apt packages, Docker, mise itself; always installed, never
          selected by a project
 Phase 3  tools — one `mise install` for every module in the spec
-Phase 4  workspace — mount is already present via virtiofs
-Phase 5  config files — copy each `files` entry from the host mount to its guest
+Phase 4  config files — copy each `files` entry from the host mount to its guest
          destination
-Phase 6  user scripts — run each `scripts` entry, in order, as root
-Phase 7  restart — applies group membership (docker) and anything else a live
+Phase 5  user scripts — run each `scripts` entry, in order, as root
+Phase 6  restart — applies group membership (docker) and anything else a live
          session holds
 ```
 

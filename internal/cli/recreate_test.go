@@ -16,7 +16,7 @@ func TestRecreateFromRecord(t *testing.T) {
 		Modules:   []config.ModuleSpec{{Name: "node"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
-		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
 	}
 	_ = store.Write(rec)
 	r := &okRunner{}
@@ -54,7 +54,7 @@ func TestRecordToResolvedBackfillsEmptyVersion(t *testing.T) {
 	rec := registry.Record{
 		Name: "my-api", User: "me",
 		Modules:   []config.ModuleSpec{{Name: "node", Version: ""}, {Name: "go", Version: "1.24"}},
-		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
 	}
 	r := recordToResolved(rec)
 	if len(r.Modules) != 2 {
@@ -75,7 +75,7 @@ func TestRecordToResolvedBackfillsEmptyVersion(t *testing.T) {
 func TestRecordToResolvedCarriesMounts(t *testing.T) {
 	rec := registry.Record{
 		Name: "my-api", User: "me",
-		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
 		Mounts:    []config.Mount{{HostPath: "/h/shared", GuestPath: "/home/me/shared"}},
 	}
 	r := recordToResolved(rec)

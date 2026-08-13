@@ -23,7 +23,7 @@ graph TB
             ca["ca-certificates/<br/><i>root CAs (PEM)</i>"]
             gitcfg[".gitconfig<br/><i>sanitized git config</i>"]
         end
-        spec[".agent-vm.yaml<br/><i>Project Spec (in repo, optional)</i>"]
+        spec[".agent-vm.yaml<br/><i>Project Spec (in repo, required)</i>"]
     end
 
     subgraph Lima["Lima (virtualization backend)"]
@@ -36,11 +36,10 @@ graph TB
         p1["Phase 1: system layer<br/>(certs / trust / global env)"]
         p2["Phase 2: platform<br/>(apt packages, Docker, mise)"]
         p3["Phase 3: tools<br/>(one mise install)"]
-        p4["Phase 4: workspace<br/>(mount ready / clone)"]
-        p5["Phase 5: config files"]
-        p6["Phase 6: user scripts"]
-        p7["Phase 7: restart"]
-        p0 --> p1 --> p2 --> p3 --> p4 --> p5 --> p6 --> p7
+        p4["Phase 4: config files"]
+        p5["Phase 5: user scripts"]
+        p6["Phase 6: restart"]
+        p0 --> p1 --> p2 --> p3 --> p4 --> p5 --> p6
     end
 
     cli -- "reads / writes" --> registry
@@ -49,7 +48,7 @@ graph TB
     limactl -- "provisions" --> Guest
     Store -. "RO virtiofs mount<br/>/mnt/host/agent-vm" .-> Guest
     ca -. "source for" .-> p1
-    spec -. "source for" .-> p5
+    spec -. "source for" .-> p4
 ```
 
 **Layer boundaries:**
@@ -58,7 +57,7 @@ graph TB
 |-------|----------------|-------------------------|
 | Go CLI | Parse config, manage the registry, plan provisioning, drive lifecycle | `limactl` subprocess calls (stable CLI contract) |
 | Lima | Create/run VMs, mounts, SSH, exec | Bash executed in guest via `limactl shell ... sudo bash -s` |
-| Bash provisioning | The guest scripts are the platform layer: certificates, apt packages, Docker, mise, config files, workspace, restart. Per-tool installation is delegated to mise, driven by one rendered `mise install` rather than a script per tool. | Guest env contract (see §5) |
+| Bash provisioning | The guest scripts are the platform layer: certificates, apt packages, Docker, mise, config files, restart. Per-tool installation is delegated to mise, driven by one rendered `mise install` rather than a script per tool. | Guest env contract (see §5) |
 
 ## 2. CLI Language: Go
 
@@ -102,18 +101,18 @@ Dependency rule: `internal/lima` is the only package that knows about `limactl`;
 
 ## 3. Configuration Model: Project Spec vs VM Record
 
-The system has **two** config artifacts with distinct, non-overlapping roles. This separation is the backbone of clone mode and of the registry invariant.
+The system has **two** config artifacts with distinct, non-overlapping roles. This separation is the backbone of the registry invariant.
 
 | | `.agent-vm.yaml` — **Project Spec** | `~/.config/agent-vm/vms/<name>.yaml` — **VM Record** |
 |---|---|---|
 | Author | human | the tool |
 | Location | in the repo, under version control | host-local, never shared |
 | Role | *intent* — what kind of VM this project wants | *materialization* — what VM actually exists on this host |
-| Contains | modules, resources, `files`, `scripts`, `base.image` | the resolved spec **plus** create-time facts: absolute host path (mount) or repo URL + ref + in-guest path (clone), resolved base image, `source: project\|cli`, VM name, created-at, resolved `files` entries, `scripts` paths, and `installedTools` — the tool versions mise actually resolved |
+| Contains | modules, resources, `files`, `scripts`, `base.image` | the resolved spec **plus** create-time facts: absolute host path + in-guest path, resolved base image, VM name, created-at, resolved `files` entries, `scripts` paths, and `installedTools` — the tool versions mise actually resolved |
 | Portable | **yes** — moves config between people and machines | no — local instance state |
-| May be absent | yes (clone from a bare repo) | no — always present for a managed VM |
+| May be absent | no — `avm create` requires it | no — always present for a managed VM |
 
-The Project Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec (from a file or from flags) and writes a Record. Because the Record is self-contained, `recreate`, `list`, and reconciliation work **without** the repo or the current directory, identically for mount and clone modes.
+The Project Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec and writes a Record. Because the Record is self-contained, `recreate`, `list`, and reconciliation work **without** the repo or the current directory.
 
 **Config resolution order (one mental model for `avm create`):**
 
@@ -121,7 +120,7 @@ The Project Spec is the *source*; the VM Record is a *self-contained snapshot* o
 flags  >  in-repo .agent-vm.yaml  >  built-in defaults
 ```
 
-**Transferring config between users** goes through the Project Spec, never the Record. For a mount / shared project, a colleague clones the repo and runs `avm create` to get an equivalent VM (the in-repo file is required for this). For a clone / bare repo, the portable artifact is either the `avm create --repo=... --modules=...` invocation, or a `.agent-vm.yaml` committed into that repo — `avm create --repo=URL` clones first and then honors the in-repo Spec if present (flags still override it).
+**Transferring config between users** goes through the Project Spec, never the Record. A colleague checks out the repo and runs `avm create` to get an equivalent VM — the in-repo file is required for this.
 
 ### Example — Project Spec (`.agent-vm.yaml`)
 
@@ -143,14 +142,13 @@ scripts:
 #   image: corp-ubuntu-2204-hardened
 ```
 
-Workspace mode is **not** part of the Spec — it is determined by the presence of `--repo` at `avm create` time and recorded only in the VM Record.
+The Spec carries **no** workspace paths — the host path is the directory `avm create` runs in, and both it and the derived guest path are recorded only in the VM Record.
 
 ### Example — VM Record (`~/.config/agent-vm/vms/my-api.yaml`)
 
 ```yaml
 # Generated by the tool. Host-local. Mirrors one Lima VM 1:1.
 name: my-api
-source: cli            # or: project (materialized from an in-repo Spec)
 createdAt: "2026-06-14T12:00:00Z"
 user: m_doshevsky           # resolved guest Linux username
 base:
@@ -159,14 +157,8 @@ modules: [{ node: lts }, claude]
 installedTools: [{ node: 22.9.0 }, { claude: 2.1.4 }]  # what mise actually resolved
 resources: { cpus: 4, memory: 8GiB, disk: 120GiB }
 workspace:
-  mode: clone          # or: mount
-  # clone mode (an SSH remote is also supported; clone mode forwards the host SSH agent):
-  repo: https://github.com/acme/my-api.git
-  ref: main
+  hostPath: /Users/me/projects/my-api
   guestPath: /home/user.linux/my-api
-  # mount mode would instead carry:
-  # hostPath: /Users/me/projects/my-api
-  # guestPath: /home/user.linux/my-api
 files:
   - { root: workspace, rel: claude-settings.json, to: ~/.claude/settings.json }
 scripts:
@@ -195,23 +187,17 @@ sequenceDiagram
     CLI->>Guest: Phase 3 — tools (sudo bash -s)
     Note over Guest: one rendered `mise install` for every module in the spec;<br/>`mise ls -i -J` reports back the resolved versions
 
-    alt workspace.mode == clone
-        CLI->>Guest: Phase 4 — git clone <repo> <guestPath><br/>(SSH agent forwarded)
-    else workspace.mode == mount
-        Note over Guest: Phase 4 — workspace already present via virtiofs mount
-    end
-
-    CLI->>Guest: Phase 5 — config files (sudo bash -s)
+    CLI->>Guest: Phase 4 — config files (sudo bash -s)
     Note over Guest: copy each `files` entry from its mount to its guest destination
 
     loop each entry in spec order
-        CLI->>Guest: Phase 6 — user script (sudo bash -s, env contract)
+        CLI->>Guest: Phase 5 — user script (sudo bash -s, env contract)
     end
 
     CLI->>Lima: restart, unconditionally
 ```
 
-Phases 1, 4, and 5–6 isolate the cross-cutting, workspace, and project-supplied concerns; phase 3 is the only one that depends on the project's tool selection. The planner owns ordering and per-phase status across the whole sequence, and the restart is unconditional because any provisioned VM may have changed group membership or global env.
+Phases 1 and 4–5 isolate the cross-cutting and project-supplied concerns; phase 3 is the only one that depends on the project's tool selection. The planner owns ordering and per-phase status across the whole sequence, and the restart is unconditional because any provisioned VM may have changed group membership or global env.
 
 ## 5. Guest Env Contract
 
@@ -221,7 +207,7 @@ Each provisioning script runs as root, with `DEBIAN_FRONTEND=noninteractive`, fe
 |----------|-------|-------|
 | `VM_USER` | unprivileged guest user | for `sudo -u` and `usermod` |
 | `VM_PROJECT` | project / VM name | naming, labels |
-| `VM_WORKSPACE` | absolute path to the code in the guest | mount point (mount) or clone dir (clone) |
+| `VM_WORKSPACE` | absolute path to the code in the guest | mount point of the host project directory |
 | `VM_SECRETS` | `/mnt/host/agent-vm` (read-only) | source root for `files` entries anchored under `~/.config/agent-vm/` |
 
 Certificates are deliberately *not* in this contract. No platform script or `files`/`scripts` entry reads `ca-certificates/` or sets `NODE_EXTRA_CA_CERTS` — the system layer (Phase 1) has already configured trust globally before anything else runs. This is the concrete mechanism by which tools know nothing about certificates.
@@ -258,7 +244,7 @@ At the **image level**, `base.image` may point at a pre-built corporate image th
 
 The registry (`~/.config/agent-vm/vms/<name>.yaml`) holds one VM Record per managed VM. The governing invariant: a managed VM and its registry Record live and die together — there is no Record without a VM, and no managed VM without a Record.
 
-The invariant is a *goal* maintained by a *reconciliation mechanism*, because the world can diverge (someone runs `limactl delete` directly). The source of truth is split: **Lima** owns *existence* (does the VM live?), and the **Registry** owns *definition* (repo, modules, resources, base image, workspace mode). Every command reconciles the two and surfaces drift rather than trusting that state is always consistent.
+The invariant is a *goal* maintained by a *reconciliation mechanism*, because the world can diverge (someone runs `limactl delete` directly). The source of truth is split: **Lima** owns *existence* (does the VM live?), and the **Registry** owns *definition* (modules, resources, base image, workspace paths). Every command reconciles the two and surfaces drift rather than trusting that state is always consistent.
 
 `avm create` writes the VM Record **first**, then builds the VM. On any provisioning failure the VM artifact is deleted (rolled back) but the Record is kept → `OrphanedRecord`, recovered via `recreate`/`prune`. `avm create` refuses a name that already has a Record.
 
@@ -289,48 +275,20 @@ stateDiagram-v2
     end note
 ```
 
-`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine); for **clone** mode this is a fresh re-clone from the remote, so anything not pushed is lost — "commit and push before recreate" is a required discipline, documented at the command. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
+`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine): the mounted host folders are untouched, but anything living only inside the guest — state outside mise, Docker volumes, files written to guest-only directories — is gone. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
 
-## 8. Workspace Modes
+## 8. Workspace
 
-One `avm create` command, two materializations, unified by the config resolution order (`flags > in-repo file > defaults`).
+The host project directory is virtiofs-mounted into the guest, writable, at `guestPath` (`~/<project>` in the guest home). Config comes from the in-repo `.agent-vm.yaml`. Git division of labor: commit/diff/branch in the VM; push/pull on the host where credentials live. A Record is written for every VM, so it stays manageable by name from anywhere.
 
-```mermaid
-graph TB
-    start(["avm create"]) --> hasrepo{"--repo given?"}
-
-    hasrepo -- no --> mountmode["mount mode"]
-    mountmode --> readcwd["read .agent-vm.yaml in cwd"]
-    readcwd --> mountmount["Lima mounts host project dir<br/>writable at guestPath (virtiofs)"]
-    mountmount --> recmount["write VM Record (source: project)"]
-
-    hasrepo -- yes --> clonemode["clone mode"]
-    clonemode --> fwd["enable SSH agent forwarding<br/>(this VM only)"]
-    fwd --> clone["Phase 4: git clone repo at guestPath<br/>inside the VM"]
-    clone --> readrepo{".agent-vm.yaml<br/>in the clone?"}
-    readrepo -- yes --> mergeflags["honor in-repo Spec,<br/>flags override"]
-    readrepo -- no --> useflags["use --modules / --cpus / --memory / --disk flags"]
-    mergeflags --> recclone["write VM Record (source: cli/project)"]
-    useflags --> recclone
-```
-
-### mount mode (default — trusted projects)
-
-The host project directory is virtiofs-mounted into the guest, writable. Config comes from the in-repo `.agent-vm.yaml`. Git division of labor: commit/diff/branch in the VM; push/pull on the host where credentials live. A Record is still written, so the VM is manageable by name from anywhere.
-
-### clone mode (code never on the host)
-
-There is no host mount of the project; the code is cloned inside the VM at `VM_WORKSPACE`. Git access uses **SSH agent forwarding, enabled only for clone-mode VMs** (not globally): the host SSH agent socket is forwarded, keys never leave the host, and the VM authenticates to the git host through the forwarded agent for the initial clone and for subsequent push/pull from within the VM. The VM Record is the only durable description of the VM (no in-repo file on the host), which is exactly why the registry exists.
-
-**Additional mounts.** Beyond the primary workspace, a VM may mount extra host folders declared in the Spec (`mounts:`, relative paths — portable intent) or via repeatable `--mount` flags. Each resolves to an absolute host path and a guest mount point `~/<name>` recorded in the VM Record (materialization). They are always writable and need no provisioning — Lima mounts them at start. Mode stays keyed to the primary; additional folders are mount-only in this iteration.
+**Additional mounts.** Beyond the primary workspace, a VM may mount extra host folders declared in the Spec (`mounts:`, relative paths — portable intent) or via repeatable `--mount` flags. Each resolves to an absolute host path and a guest mount point `~/<name>` recorded in the VM Record (materialization). They are always writable and need no provisioning — Lima mounts them at start.
 
 ## 9. Command Surface
 
 | Command | Behavior |
 |---------|----------|
 | `avm init [--modules=… --cpus=… --memory=… --disk=…]` | Write a `.agent-vm.yaml` Project Spec (optionally pre-filled). |
-| `avm create` | Mount mode from the cwd Spec; write Record + create VM. |
-| `avm create --repo=URL [--modules=… --cpus=… --memory=… --disk=… --base-image=…]` | Clone mode; clone repo into the VM; honor in-repo Spec if present, flags override. |
+| `avm create [path]` | Create + provision the VM from the project directory's Spec; write Record + create VM. Add `--mount PATH` (repeatable) for extra host folders. |
 | `avm recreate <name>` | Pristine rebuild of the VM from its Record. |
 | `avm list` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged and show runtime state. |
 | `avm shell <name>` | Open a shell in the VM (defaults to the workspace dir). |
@@ -346,13 +304,11 @@ There is no host mount of the project; the code is cloned inside the VM at `VM_W
 3. else error
 ```
 
-A clone-mode VM with no host-side file is targeted only by name — consistent with rule 1.
-
 ### Flags
 
-Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=…` takes mise tool references, e.g. `--modules=node@lts,go@1.24`. `--base-image=…` overrides the default base image. `--ref` selects the git ref to clone (clone mode only, default `main`).
+Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=…` takes mise tool references, e.g. `--modules=node@lts,go@1.24`. `--base-image=…` overrides the default base image.
 
-When no `--modules` flag is set and no in-repo Spec is found (clone from a bare repo), the built-in default modules `[node, claude]` are installed.
+When no `--modules` flag is set and the Spec has no `modules` key, the built-in default modules `[node, claude]` are installed.
 
 ## 10. Repository Layout
 
@@ -388,5 +344,4 @@ The architecture deliberately does not include: building derived/baked images fr
 | D7 | Support a corporate `base.image`; the tool does not build images. |
 | D8 | Two-artifact config model: portable Project Spec vs host-local VM Record. |
 | D9 | Host registry with a Record ⇔ VM invariant, maintained by reconciliation. |
-| D10 | Clone mode uses SSH agent forwarding, enabled per-VM only. |
-| D11 | Unified `avm create` (flags > in-repo file > defaults); uniform target resolution. |
+| D10 | Unified `avm create` (flags > in-repo file > defaults); uniform target resolution. |

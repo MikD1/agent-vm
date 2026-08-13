@@ -113,16 +113,6 @@ func (f *FileSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Workspace is the RESOLVED workspace (mode + paths). It lives in config so the
-// registry can reuse it; the Project Spec itself carries no workspace.
-type Workspace struct {
-	Mode      string `yaml:"mode"`               // "mount" | "clone"
-	GuestPath string `yaml:"guestPath"`          // absolute path to code in the guest
-	HostPath  string `yaml:"hostPath,omitempty"` // mount mode
-	Repo      string `yaml:"repo,omitempty"`     // clone mode
-	Ref       string `yaml:"ref,omitempty"`      // clone mode
-}
-
 // Spec is the human-authored Project Spec (.agent-vm.yaml). Modules is a pointer
 // so an absent key (nil → defaults may apply) is distinguishable from an explicit
 // empty list (base only).
