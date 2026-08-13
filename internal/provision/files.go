@@ -25,12 +25,25 @@ func renderFileCopies(files []config.FileCopy) []byte {
 		if f.Root == config.RootSecrets {
 			root = "${VM_SECRETS}"
 		}
-		src := fmt.Sprintf("%q", root+"/"+f.Rel)
+		// root must stay double-quoted so ${VM_WORKSPACE}/${VM_SECRETS} expand; f.Rel
+		// is a relative path out of the project workspace or the host secrets store
+		// and is not restricted to shell-safe characters, so it is single-quoted
+		// (shellQuote) separately. Go's %q on the combined string would not escape
+		// $/backticks in f.Rel, letting a name like "$(...)"" execute as a command —
+		// adjacent double- and single-quoted bash strings concatenate into one word,
+		// so this still resolves to "${EXPANDED_ROOT}/relative/path" with no double
+		// slash.
+		src := fmt.Sprintf("%q", root) + "/" + shellQuote(f.Rel)
 		// dst comes from the guest destination in the Spec, which is not restricted
 		// to shell-safe characters. Single-quote it (shellQuote), unlike src, which
 		// must stay double-quoted so ${VM_WORKSPACE}/${VM_SECRETS} expand.
 		dst := shellQuote(f.To)
-		fmt.Fprintf(&b, "install -d -m 0755 -o \"${VM_USER}\" -g \"${VM_USER}\" %s\n", shellQuote(path.Dir(f.To)))
+		dir := shellQuote(path.Dir(f.To))
+		// Only chown/chmod a directory this script actually creates. A pre-existing
+		// parent (e.g. /etc, or an already-0700 ~/.ssh) must keep its own ownership
+		// and mode; `mkdir -p` on an existing directory is a no-op that leaves it
+		// untouched.
+		fmt.Fprintf(&b, "if [ ! -d %s ]; then install -d -m 0755 -o \"${VM_USER}\" -g \"${VM_USER}\" %s; else mkdir -p %s; fi\n", dir, dir, dir)
 		fmt.Fprintf(&b, "cp -R %s %s\n", src, dst)
 		fmt.Fprintf(&b, "chown -R \"${VM_USER}:${VM_USER}\" %s\n", dst)
 		if f.Mode != "" {

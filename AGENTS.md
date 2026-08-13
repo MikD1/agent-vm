@@ -51,14 +51,14 @@ test (the Lima layer is faked in tests — see §6).
 | Run one package | `go test ./internal/cli` | |
 | Run one test | `go test ./internal/cli -run TestRootHasVerbosePersistentFlag` | `-run` is a regex; add `-v` for verbose. |
 | Vet | `make vet` (`go vet ./...`) | |
-| Shellcheck guest scripts | `make shellcheck` | `shellcheck internal/modules/scripts/*.sh`. |
+| Shellcheck guest scripts | `make shellcheck` | `shellcheck internal/provision/scripts/*.sh`. |
 | Lint (vet + shellcheck) | `make lint` | |
 | **Default gate** | `make all` | Runs **vet → test → build only**. |
 
 ### Critical tooling facts
 
 - **`make all` does NOT run shellcheck.** It is `vet → test → build`. If you edit any
-  `internal/modules/scripts/*.sh`, you must additionally run `make shellcheck`
+  `internal/provision/scripts/*.sh`, you must additionally run `make shellcheck`
   (or `make lint`).
 - **There is no CI and no `CONTRIBUTING.md`.** No `.github/` workflow runs these checks
   on push. The local gates are the *only* safety net — running them before every PR is
@@ -82,18 +82,20 @@ internal/
   config/     Project Spec schema, defaults, validation, flags>spec>defaults resolution
   registry/   VM Records (host store ~/.config/agent-vm/vms/) + Lima reconciliation
   lima/       limactl wrapper — the ONLY package that shells out to limactl
-  provision/  phase planner + module runner (drives the bash phases via lima)
-  modules/    go:embed of scripts/*.sh + external module discovery — the ONLY package
-              that knows the script layout
+  provision/  phase planner + go:embed of scripts/*.sh — drives the bash phases via lima;
+              the ONLY package that knows the platform-script layout. Per-tool
+              installation is NOT a script here — it is one rendered `mise install`
+              built from the resolved config's Modules ([]config.ModuleSpec).
   vmname/     VM name normalization / validation
   templates/  go:embed of the Lima base template + the .agent-vm.yaml init template
-internal/modules/scripts/*.sh   guest provisioning bash (embedded into the binary)
-internal/templates/files/*      base.yaml (Lima) + agent-vm.yaml (Spec template)
+internal/provision/scripts/*.sh   platform provisioning bash (embedded into the binary):
+                                   system, base, docker, mise — never per-tool scripts
+internal/templates/files/*        base.yaml (Lima) + agent-vm.yaml (Spec template)
 ```
 
 Import direction (a DAG — never create a cycle): `cmd/avm → cli`; `cli` is the wiring
-layer and fans out to `{config, registry, provision, lima, modules, templates, vmname}`;
-`provision → {config, lima, modules}`; `registry → config`. `internal/config` has
+layer and fans out to `{config, registry, provision, lima, templates, vmname}`;
+`provision → {config, lima}`; `registry → config`. `internal/config` has
 **zero** internal dependencies (pure domain types).
 
 ---
@@ -106,22 +108,30 @@ layer and fans out to `{config, registry, provision, lima, modules, templates, v
    `lima.Client`, which is driven by the injectable `lima.CommandRunner` interface.
    Never write `exec.Command("limactl", …)` outside `internal/lima`. (Mentioning
    "limactl" in a comment or user-facing error string is fine.)
-2. **Only `internal/modules` knows the bash-script layout.** The `//go:embed scripts/*.sh`
-   directive and the external-dir override live there. Other packages request scripts by
-   name via `modules.Script` / `modules.Exists` / `modules.List` — they never read
-   `scripts/` themselves.
+2. **Only `internal/provision` knows the platform-script layout.** The
+   `//go:embed scripts/*.sh` directive lives there (`internal/provision/scripts.go`).
+   Other packages never read `scripts/` themselves; the unexported `guestScript(name)`
+   accessor is the only way in, and it stays internal to the package — callers outside
+   `internal/provision` don't request platform scripts by name at all, they just call
+   `provision.New(...).Run(...)`. Per-tool installation is not a script and has no
+   equivalent accessor: a tool is a `config.ModuleSpec` (name + version) resolved by
+   mise at provision time, never embedded.
 3. **No upward or cyclic imports.** `internal/config` must stay dependency-free.
-   Validation takes an injected `known func(string) bool` callback rather than importing
-   `internal/modules`. `config` must never import `registry`, `lima`, or `modules`.
+   `Spec.Validate()` takes no argument — module names are mise tool references and are
+   not checked against a catalog (an unknown name surfaces when mise runs), so there is
+   nothing to inject. `config` must never import `registry`, `lima`, or `provision`.
 
 ### The config types (Spec → Resolved → Record)
 
 - **`config.Spec`** (`internal/config/spec.go`) — the portable, human-authored Project
-  Spec (`.agent-vm.yaml`): `Modules *[]string`, `Resources`, `Base`. `Modules` is a
+  Spec (`.agent-vm.yaml`): `Modules *[]ModuleSpec`, `Resources`, `Base`. `Modules` is a
   **pointer on purpose**: `nil` (key absent → defaults may apply) is semantically
-  different from an explicit empty list (base-only). Do not "simplify" it to `[]string`.
-  The Spec carries **no** workspace mode — that's decided by the presence of `--repo` at
-  create time and recorded only in the Record.
+  different from an explicit empty list (no tools beyond the always-installed platform).
+  Do not "simplify" it to `[]ModuleSpec`. Each `ModuleSpec` is a mise tool reference (name
+  + optional version) accepting either a bare scalar (`- claude`) or a single-key mapping
+  (`- node: lts`) in YAML, or `name@version` (`node@lts`) on the `--modules` flag via
+  `ParseModuleRef`. The Spec carries **no** workspace mode — that's decided by the
+  presence of `--repo` at create time and recorded only in the Record.
 - **`config.Resolved`** (`internal/config/resolve.go`) — the bridge produced by
   `config.Resolve`. Both the Lima config and the Record are built from it.
 - **`registry.Record`** (`internal/registry/record.go`) — the host-local materialization
@@ -174,9 +184,28 @@ new "absent vs explicit" flag.
 
 ## 5. Provisioning scripts (bash) conventions
 
-Guest provisioning lives in `internal/modules/scripts/*.sh`, embedded into the binary.
-One script per module: `system.sh` (Phase 1), `base.sh` (Phase 2), then feature modules
-`node`, `dotnet`, `go`, `docker`, `claude`, `codex` (Phase 3).
+Guest provisioning lives in `internal/provision/scripts/*.sh`, embedded into the binary.
+These are **platform scripts**, not per-tool scripts — there is no script per module.
+The full phase sequence, driven from `Provisioner.Run` (`internal/provision/provision.go`):
+
+1. **Phase 0** — create + start the VM (Lima).
+2. **Phase 1** — `system.sh`: host CA certs into the trust store, trust env globally.
+3. **Phase 2** — platform, always installed, never selected by a project: `base.sh`
+   (apt packages, sanitized gitconfig), `docker.sh`, `mise.sh` (installs mise itself).
+4. **Phase 3** — tools, in **one** mise invocation: a rendered `mise install` built from
+   the resolved config's `Modules []config.ModuleSpec`, followed by `mise ls -i -J` to
+   read back what mise actually resolved (for the Record's `installedTools`; see §4's
+   `guestScript` note — this is Go-rendered, not an embedded script).
+5. **Phase 4** — workspace: `git clone` for clone mode, a no-op for mount mode (virtiofs).
+6. **Phase 5** — config files: copy each `files` entry from its mount to its destination.
+7. **Phase 6** — user scripts, in spec order (arbitrary bash a project supplies via
+   `scripts:` in `.agent-vm.yaml` — not to be confused with the embedded platform
+   scripts this section is about).
+8. **Phase 7** — restart, unconditionally.
+
+Adding support for a new *tool* needs no script at all — see §7.A. This section's rules
+apply to the four embedded **platform** scripts (`system.sh`, `base.sh`, `docker.sh`,
+`mise.sh`) and to any new one you add at that layer.
 
 ### How scripts actually run
 
@@ -198,36 +227,37 @@ The Go wrapper already exports `DEBIAN_FRONTEND=noninteractive` globally before 
 the script, so adding `export DEBIAN_FRONTEND=noninteractive` in-script is optional and
 redundant (about half the existing scripts include it for clarity; both styles are fine).
 
-### Guest env contract (the only inputs a module may rely on)
+### Guest env contract (the only inputs a platform script or a `files`/`scripts` entry may rely on)
 
 | Variable | Value | Use |
 |----------|-------|-----|
 | `VM_USER` | unprivileged guest user | `sudo -u "$VM_USER" -H …`, `usermod` |
 | `VM_PROJECT` | project / VM name | labels, naming |
 | `VM_WORKSPACE` | absolute path to code in the guest | mount point or clone dir |
-| `VM_SECRETS` | `/mnt/host/agent-vm` (**read-only** virtiofs) | module config at `$VM_SECRETS/modules/<name>/` |
+| `VM_SECRETS` | `/mnt/host/agent-vm` (**read-only** virtiofs) | `files` entries anchored under `~/.config/agent-vm/`; `base.sh` reads a sanitized `.gitconfig` from here |
 
-Do not invent new contract vars and do not read anything outside `$VM_SECRETS`.
+Do not invent new contract vars and do not read anything outside `$VM_SECRETS`. There is
+no per-tool config directory (no `$VM_SECRETS/modules/<name>/`) — mise-installed tools
+take their config from wherever the tool itself expects it, typically written there by a
+`files` entry in the Spec.
 
-### Rules for module scripts
+### Rules for platform scripts
 
-- **Never touch CA certificates.** Phase 1 (`system.sh`) installs host CAs and exports
-  trust env (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
-  `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`) globally. A feature module MUST NOT read
-  `ca-certificates/`, set any `*_CA_*` var, or call `update-ca-certificates`. Trust is
-  inherited transparently.
-- **Module config is optional.** Read per-module config from `$VM_SECRETS/modules/<name>/`,
-  always guarded with `[ -f … ]`, and degrade gracefully if absent. Credentials written
-  into the user's HOME get `chmod 600`; drop privileges with `sudo -u "$VM_USER" -H …`.
+- **Never touch CA certificates** (except `system.sh` itself). Phase 1 installs host CAs
+  and exports trust env (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
+  `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`) globally. `base.sh`/`docker.sh`/`mise.sh` (and every
+  mise-installed tool) MUST NOT read `ca-certificates/`, set any `*_CA_*` var, or call
+  `update-ca-certificates`. Trust is inherited transparently.
 - **Be idempotent** (scripts re-run on `avm recreate`): install-guard with
   `command -v <tool> >/dev/null 2>&1 || { install… }`; edit env files delete-then-append
   per key, not blind append; use `ln -sf` for PATH shims.
 - **PATH needs two places.** `avm shell` opens a **non-login** shell that does not source
   `/etc/profile.d`. For a tool to be on `PATH` there, add a `/usr/local/bin` symlink or
-  an `/etc/environment` entry **in addition to** `/etc/profile.d/<name>.sh` (see `go.sh`,
-  `dotnet.sh`).
+  an `/etc/environment` entry **in addition to** `/etc/profile.d/<name>.sh` (see how
+  `mise.sh` wires mise's shim dir into both `/etc/profile.d/mise.sh` and
+  `/etc/environment`, plus `secure_path` in a sudoers drop-in for `sudo <tool>`).
 - **Big downloads go to `/var/tmp`, not `/tmp`** (`/tmp` is a small tmpfs that overflows
-  on SDK/toolchain archives).
+  on SDK/toolchain archives — `mise.sh` downloads the mise release binary there).
 - **Failure handling:** use `|| true` only for genuinely optional side effects (e.g.
   docker `systemctl enable`/`usermod`). On the hard-requirement path, do not swallow
   exit codes — let `set -e` fail, or echo `Warning: …` to stderr for best-effort steps.
@@ -274,39 +304,43 @@ golden files, no `testdata/`. Keep it that way.
 
 ## 7. How to make common changes
 
-Three layers move: Go (`internal/`), bash (`internal/modules/scripts/`), templates
+Three layers move: Go (`internal/`), bash (`internal/provision/scripts/`), templates
 (`internal/templates/files/`). After **any** change: run `make all`; if you touched a
 `.sh`, also run `make shellcheck`. Always add/extend a test and update docs
 (`README.md` + `docs/architecture.md` are part of "done").
 
-### A. Add a feature module (e.g. `rust`, `python`)
+### A. Add support for a new tool (e.g. `rust`, `python`) vs. add a new platform script
 
-Modules are **discovered, not registered** — there is no allowlist or enum to edit.
-`//go:embed scripts/*.sh` makes `modules.List()`/`Script()` pick up any new file
-automatically.
+These are two different things — don't confuse them.
 
-1. Create `internal/modules/scripts/<name>.sh`. Copy an existing one (`codex.sh` is a
-   good small template). Follow §5: header, env contract, idempotency, no CA handling,
-   user-level installs via `sudo -u "$VM_USER" -H …`, optional config from
-   `$VM_SECRETS/modules/<name>/`.
-2. **Dependencies are not validated in Go.** If your module needs another (e.g. `node`),
-   add a runtime guard in the script — mirror `codex.sh`
-   (`command -v npm >/dev/null 2>&1 || { echo "Error: …"; exit 1; }`). Install order is
-   spec order (`internal/provision/provision.go`), so the user must list the dependency
-   first.
-3. If your module needs a **VM restart** to take effect (currently only `docker`, for
-   group membership), add a name check in `internal/provision/provision.go` to set
-   `needsRestart = true`.
-4. Extend the hardcoded module set in `internal/modules/modules_test.go` (the test won't
-   fail if you forget — that's the trap — but it documents the module set).
-5. Docs: add a row to the Modules table in `README.md`, note it in
-   `docs/architecture.md` if relevant, and add a commented line to
-   `internal/templates/files/agent-vm.yaml` if it's common enough for `avm init`.
+**Adding a tool needs no code change at all**, if it's in mise's registry (or reachable
+via a mise backend like `npm:`/`aqua:`/`cargo:`). A user just adds it to `modules:` in
+their `.agent-vm.yaml` (or `--modules=name@version` on `avm create`) — Phase 3 renders it
+into the one `mise install` invocation. There is nothing to embed, register, or test in
+this repo for that case; if a request describes "adding a new module," check first
+whether it's really just a mise tool reference the user can add to their own Spec.
 
-> A user can also drop `<root>/modules.d/<name>.sh` at runtime (where `<root>` is
-> `$XDG_CONFIG_HOME/agent-vm` if set, else `~/.config/agent-vm`), which overrides the
-> embedded copy without a rebuild. The module must still appear in the resolved module
-> list (flags/spec/defaults) to actually run — `modules.d` does not auto-enable a module.
+**Adding a new *platform* script** (a Phase-1/2 step like `system.sh`/`base.sh`/
+`docker.sh`/`mise.sh` — something that must run as root, once, for every VM, regardless
+of the project's tool selection) is the actual analog of the old "add a module" recipe:
+
+1. Create `internal/provision/scripts/<name>.sh`. Copy an existing platform script as a
+   template. Follow §5: header, env contract, idempotency, no CA handling (except in
+   `system.sh` itself).
+2. Wire it into the phase sequence in `internal/provision/provision.go` — most likely
+   into the Phase 2 platform loop (`{"base", …}, {"docker", …}, {"mise", …}`), in the
+   order it must run.
+3. If it needs a **VM restart** to take effect (currently `docker`, for group
+   membership, and the unconditional Phase 7 restart already covers this — a new
+   platform step should not need its own restart logic).
+4. Extend `internal/provision/scripts_test.go`'s `TestGuestScriptsPresent` name list so
+   the new script's shebang/`set -euo pipefail` header is checked.
+5. Docs: update the phase list in `docs/architecture.md` §1/§4 and, if user-visible,
+   `README.md`.
+
+There is no `modules.d` runtime-override directory and no external-module discovery —
+the platform scripts are a small, fixed, embedded set; nothing here is user-extensible
+without a rebuild.
 
 ### B. Add a CLI command
 
@@ -363,16 +397,18 @@ type(scope): imperative subject
 - Subject is lowercase, imperative ("add", "fix", "route" — not "added"), no trailing period.
 - **Types in use:** `feat`, `fix`, `docs`, `chore`, `refactor`. (No `test:`/`ci:` types —
   ship `*_test.go` inside the `feat`/`fix` commit it belongs to.)
-- **Scope** is the package, module, or area touched — pick the one matching your change.
-  Common ones in history: `cli`, `lima`, `provision`, `registry`, `config`, `templates`,
-  `modules`, `vmname`, `architecture`, the per-module names (`claude`, `codex`, `node`,
-  `dotnet`, `go`, `base`), and occasionally a finer command scope (`create`). Use a nested
-  scope like `modules/codex` for a single module; a comma list (`cli,provision`) only for
-  a genuine cross-layer change; omit the scope only for repo-wide chores/docs.
+- **Scope** is the package or area touched — pick the one matching your change. Current
+  ones: `cli`, `lima`, `provision`, `registry`, `config`, `templates`, `vmname`,
+  `architecture`, and occasionally a finer command scope (`create`). A comma list
+  (`cli,provision`) is fine only for a genuine cross-layer change; omit the scope only
+  for repo-wide chores/docs. (Before the mise-based rewrite, per-tool bash lived under
+  `internal/modules/scripts/` and commits used `modules` or a per-tool scope like
+  `modules/codex` — that architecture is gone; use `provision` for platform-script
+  changes now.)
 
 Examples from history:
 - `feat(cli): avm create (mount + clone, Record-first, rollback to OrphanedRecord)`
-- `fix(modules): add -H to sudo in codex.sh for explicit HOME handling`
+- `feat(provision): scripts section for user provisioning`
 - `docs(architecture): sync with implemented design`
 
 ### PR workflow
@@ -395,7 +431,7 @@ Remote is `https://github.com/MikD1/agent-vm.git`; default branch is `main`.
 # 1. Go gate: vet + test + build
 make all
 
-# 2. Shell lint — ONLY if you touched internal/modules/scripts/*.sh
+# 2. Shell lint — ONLY if you touched internal/provision/scripts/*.sh
 #    (make all does NOT run shellcheck)
 make shellcheck
 

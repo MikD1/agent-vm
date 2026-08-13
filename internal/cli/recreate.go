@@ -13,10 +13,23 @@ import (
 )
 
 // recordToResolved rebuilds the Resolved config from a stored Record.
+//
+// A Record written before modules carried a per-tool version (or hand-edited
+// to the old `modules: [name, ...]` form) can have a ModuleSpec with an empty
+// Version. config.Resolve normally backfills that to config.DefaultToolVersion
+// on the fresh-create path (internal/config/resolve.go); recordToResolved
+// bypasses Resolve entirely, so it must apply the same backfill itself —
+// otherwise renderMiseConfig would emit a broken `"node" = ""` TOML entry.
 func recordToResolved(rec registry.Record) config.Resolved {
+	modules := append([]config.ModuleSpec(nil), rec.Modules...)
+	for i := range modules {
+		if modules[i].Version == "" {
+			modules[i].Version = config.DefaultToolVersion
+		}
+	}
 	return config.Resolved{
 		Name: rec.Name, Source: rec.Source, User: rec.User,
-		Modules: rec.Modules, Resources: rec.Resources, Base: rec.Base,
+		Modules: modules, Resources: rec.Resources, Base: rec.Base,
 		Workspace: rec.Workspace, Mounts: rec.Mounts, Files: rec.Files, Scripts: rec.Scripts,
 	}
 }

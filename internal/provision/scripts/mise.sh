@@ -30,11 +30,14 @@ if ! command -v mise >/dev/null 2>&1; then
 
   # Verify against the published digest before trusting the binary. Match the
   # filename with awk on the exact field rather than grep, so neither the dots in
-  # the version nor the sibling "-musl" asset can match by accident. Run from
-  # /var/tmp so the filename in the checksum line resolves.
+  # the version nor the sibling "-musl" asset can match by accident. mise's
+  # SHASUMS256.txt lists filenames "./"-prefixed (e.g. "./mise-v2026.8.4-linux-x64"),
+  # so strip that prefix before comparing and re-print without it — the file on
+  # disk at /var/tmp/${asset} has no "./" prefix, and sha256sum -c expects the
+  # printed filename to match what it opens. Run from /var/tmp so it resolves.
   (
     cd /var/tmp
-    awk -v f="$asset" '$2 == f { print; found = 1 } END { exit !found }' \
+    awk -v f="$asset" '{ n = $2; sub(/^\.\//, "", n) } n == f { print $1 "  " n; found = 1 } END { exit !found }' \
       mise-SHASUMS256.txt | sha256sum -c -
   )
 

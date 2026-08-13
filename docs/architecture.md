@@ -350,7 +350,7 @@ A clone-mode VM with no host-side file is targeted only by name — consistent w
 
 ### Flags
 
-Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=a,b,c` selects feature modules in order. `--base-image=…` overrides the default base image. `--ref` selects the git ref to clone (clone mode only, default `main`).
+Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=…` takes mise tool references, e.g. `--modules=node@lts,go@1.24`. `--base-image=…` overrides the default base image. `--ref` selects the git ref to clone (clone mode only, default `main`).
 
 When no `--modules` flag is set and no in-repo Spec is found (clone from a bare repo), the built-in default modules `[node, claude]` are installed.
 

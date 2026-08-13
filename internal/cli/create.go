@@ -167,7 +167,7 @@ func newCreateCmd() *cobra.Command {
 			return runCreate(ctx, deps, resolved, home, time.Now(), verbose)
 		},
 	}
-	cmd.Flags().StringSliceVar(&f.Modules, "modules", nil, "feature modules in order (a,b,c)")
+	cmd.Flags().StringSliceVar(&f.Modules, "modules", nil, "mise tool references, e.g. node@lts,go@1.24")
 	cmd.Flags().IntVar(&f.CPUs, "cpus", 0, "override cpus")
 	cmd.Flags().StringVar(&f.Memory, "memory", "", "override memory (e.g. 16GiB)")
 	cmd.Flags().StringVar(&f.Disk, "disk", "", "override disk (e.g. 200GiB)")

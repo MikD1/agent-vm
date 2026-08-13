@@ -84,14 +84,19 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	if err := p.lima.Provision(ctx, r.Name, renderMiseInstall(r.Modules, p.verbose), p.env(r)); err != nil {
 		return fmt.Errorf("phase 3 (mise install): %w", err)
 	}
+	// The read-back below is metadata only: mise install (above) already
+	// succeeded, so a failure here must not roll back an otherwise-successfully
+	// provisioned VM. Warn and continue with p.installed left empty — the same
+	// reasoning cli/create.go already applies one layer up to the Record write
+	// itself ("a failure here leaves a working VM with a slightly stale Record,
+	// which is not worth rolling back").
 	listed, err := p.lima.ProvisionOutput(ctx, r.Name,
 		[]byte("export MISE_DATA_DIR="+miseDataDir+"\nmise ls -i -J\n"), p.env(r))
 	if err != nil {
-		return fmt.Errorf("phase 3 (mise ls): %w", err)
-	}
-	p.installed, err = parseMiseList(listed)
-	if err != nil {
-		return fmt.Errorf("phase 3 (mise ls): %w", err)
+		fmt.Printf("Warning: could not read back installed tool versions: %v\n", err)
+	} else if p.installed, err = parseMiseList(listed); err != nil {
+		fmt.Printf("Warning: could not read back installed tool versions: %v\n", err)
+		p.installed = nil
 	}
 	// Phase 4 — workspace (clone only; mount is already present via virtiofs).
 	if r.Workspace.Mode == config.ModeClone {
@@ -124,9 +129,9 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	}
 	// Phase 7 — restart, always. It applies group membership (docker),
 	// /etc/environment, and anything the guest changed that a live session holds.
-	fmt.Printf("==> Restarting VM to apply provisioning\n")
+	fmt.Printf("==> Phase 7: restarting VM to apply provisioning\n")
 	if err := p.lima.Restart(ctx, r.Name); err != nil {
-		return err
+		return fmt.Errorf("phase 7 (restart): %w", err)
 	}
 	return nil
 }

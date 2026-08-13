@@ -97,7 +97,7 @@ func TestPlanFilesPhase(t *testing.T) {
 	}
 	var sawCopy bool
 	for _, in := range rec.stdin {
-		if strings.Contains(in, `cp -R "${VM_WORKSPACE}/settings.json"`) {
+		if strings.Contains(in, `cp -R "${VM_WORKSPACE}"/'settings.json'`) {
 			sawCopy = true
 		}
 	}
@@ -152,6 +152,49 @@ func TestPlanScriptsPhaseMissingFile(t *testing.T) {
 	p := New(lima.New(rec), false)
 	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err == nil {
 		t.Error("missing script = nil error, want an error")
+	}
+}
+
+// miseLsFailRunner behaves like recorder (returns "{}" for every call, so the
+// phase-order tests above keep passing if reused), except any stdin
+// containing "mise ls -i -J" gets malformed, non-JSON stdout back — simulating
+// stray guest output on that specific read-back.
+type miseLsFailRunner struct {
+	args [][]string
+}
+
+func (r *miseLsFailRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, []byte, error) {
+	r.args = append(r.args, args)
+	if strings.Contains(string(stdin), "mise ls -i -J") {
+		return []byte("not json\n"), nil, nil
+	}
+	return []byte("{}"), nil, nil
+}
+
+// TestPlanSurvivesBrokenMiseListReadback proves a failed `mise ls` metadata
+// read-back does not roll back an otherwise-successfully-provisioned VM: by
+// this point `mise install` has already succeeded, so only the Record's
+// InstalledTools ends up stale, exactly like a failed Record write one layer
+// up in cli/create.go. Before this fix, Provisioner.Run returned an error here
+// and the caller (cli create/recreate) deleted the just-provisioned VM.
+func TestPlanSurvivesBrokenMiseListReadback(t *testing.T) {
+	r := &miseLsFailRunner{}
+	p := New(lima.New(r), false)
+	if err := p.Run(context.Background(), mountResolved(), "/tmp/cfg.yaml"); err != nil {
+		t.Fatalf("Run() = %v, want nil (mise ls failure must be non-fatal)", err)
+	}
+	if got := p.InstalledTools(); len(got) != 0 {
+		t.Errorf("InstalledTools() = %v, want empty after a broken mise ls read-back", got)
+	}
+	// The pipeline must still have reached the final restart.
+	var sawRestart bool
+	for _, a := range r.args {
+		if len(a) > 0 && a[0] == "restart" {
+			sawRestart = true
+		}
+	}
+	if !sawRestart {
+		t.Errorf("pipeline did not reach restart; ops = %v", r.args)
 	}
 }
 

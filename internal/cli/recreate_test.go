@@ -44,6 +44,34 @@ func TestRecreateMissingRecord(t *testing.T) {
 	}
 }
 
+// TestRecordToResolvedBackfillsEmptyVersion guards a Record written before
+// per-tool versions existed (or hand-edited from the old `modules: [name]`
+// shorthand), where a ModuleSpec's Version is "". recordToResolved bypasses
+// config.Resolve — the only place DefaultToolVersion is normally applied — so
+// it must backfill the empty Version itself; otherwise renderMiseConfig would
+// emit a broken `"node" = ""` entry into the guest's mise config.
+func TestRecordToResolvedBackfillsEmptyVersion(t *testing.T) {
+	rec := registry.Record{
+		Name: "my-api", User: "me",
+		Modules:   []config.ModuleSpec{{Name: "node", Version: ""}, {Name: "go", Version: "1.24"}},
+		Workspace: config.Workspace{Mode: "mount", GuestPath: "/home/me/my-api", HostPath: "/h/my-api"},
+	}
+	r := recordToResolved(rec)
+	if len(r.Modules) != 2 {
+		t.Fatalf("recordToResolved(%+v).Modules = %+v, want 2 entries", rec.Modules, r.Modules)
+	}
+	if r.Modules[0].Name != "node" || r.Modules[0].Version != config.DefaultToolVersion {
+		t.Errorf("empty Version not backfilled: got %+v, want Version %q", r.Modules[0], config.DefaultToolVersion)
+	}
+	if r.Modules[1].Version != "1.24" {
+		t.Errorf("an already-set Version must not be overwritten: got %+v", r.Modules[1])
+	}
+	// The Record itself (rec.Modules) must not be mutated in place.
+	if rec.Modules[0].Version != "" {
+		t.Errorf("recordToResolved must not mutate the input Record: rec.Modules = %+v", rec.Modules)
+	}
+}
+
 func TestRecordToResolvedCarriesMounts(t *testing.T) {
 	rec := registry.Record{
 		Name: "my-api", User: "me",

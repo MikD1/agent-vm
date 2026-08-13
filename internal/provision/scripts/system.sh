@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Phase 1 — system layer. Runs as root before any module.
+# Phase 1 — system layer. Runs as root before any platform step or tool.
 # Installs host CA certificates into the system trust store and exports trust
-# env globally, so every later tool/module inherits trust with no per-module code.
+# env globally, so every later platform step (base, docker, mise) and every
+# mise-installed tool inherits trust with no per-tool code.
 # Contract: VM_USER, VM_PROJECT, VM_WORKSPACE, VM_SECRETS (see architecture §5).
 
 export DEBIAN_FRONTEND=noninteractive
