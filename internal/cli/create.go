@@ -63,6 +63,13 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 		}
 		return fmt.Errorf("%w\n%s; record kept. Run `avm recreate %s` to retry or `avm prune %s` to discard", provErr, rollbackMsg, r.Name, r.Name)
 	}
+	// The VM exists now, so record what mise resolved. A failure here leaves a
+	// working VM with a slightly stale Record, which is not worth rolling back.
+	rec := registry.FromResolved(r, now)
+	rec.InstalledTools = p.InstalledTools()
+	if err := deps.store.Write(rec); err != nil {
+		fmt.Printf("Warning: could not record installed tool versions: %v\n", err)
+	}
 	fmt.Printf("VM ready: %s\nConnect: avm shell %s\n", r.Name, r.Name)
 	return nil
 }

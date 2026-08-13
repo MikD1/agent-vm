@@ -17,7 +17,7 @@ type recorder struct {
 func (r *recorder) Run(ctx context.Context, stdin []byte, args ...string) ([]byte, []byte, error) {
 	r.args = append(r.args, args)
 	r.stdin = append(r.stdin, string(stdin))
-	return nil, nil, nil
+	return []byte("{}"), nil, nil
 }
 
 func ops(r *recorder) []string {
@@ -46,8 +46,8 @@ func TestPlanMountOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	// create, start, 4 platform provisions (system, base, docker, mise),
-	// 1 mise install, then the unconditional restart.
-	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "restart"}
+	// 1 mise install, 1 mise ls read-back, then the unconditional restart.
+	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
 	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("ops = %v, want %v", got, want)
 	}
@@ -62,7 +62,7 @@ func TestPlanRestartsWithoutDocker(t *testing.T) {
 	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "restart"}
+	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
 	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("ops = %v, want %v", got, want)
 	}
@@ -77,7 +77,7 @@ func TestPlanCloneAddsClonePhase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One more shell than the mount case: the clone.
-	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
+	want := []string{"create", "start", "shell", "shell", "shell", "shell", "shell", "shell", "shell", "restart"}
 	if got := ops(rec); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("ops = %v, want %v", got, want)
 	}

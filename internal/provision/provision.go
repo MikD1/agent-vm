@@ -13,14 +13,19 @@ import (
 
 // Provisioner runs the phases for one VM.
 type Provisioner struct {
-	lima    *lima.Client
-	verbose bool // mirrors --verbose onto the tools the guest runs
+	lima      *lima.Client
+	verbose   bool // mirrors --verbose onto the tools the guest runs
+	installed []config.ModuleSpec
 }
 
 // New builds a Provisioner.
 func New(c *lima.Client, verbose bool) *Provisioner {
 	return &Provisioner{lima: c, verbose: verbose}
 }
+
+// InstalledTools reports the tool versions mise actually resolved. It is valid
+// after a successful Run.
+func (p *Provisioner) InstalledTools() []config.ModuleSpec { return p.installed }
 
 func (p *Provisioner) env(r config.Resolved) map[string]string {
 	return map[string]string{
@@ -77,6 +82,15 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	fmt.Printf("==> Phase 3: installing %d tool(s) with mise\n", len(r.Modules))
 	if err := p.lima.Provision(ctx, r.Name, renderMiseInstall(r.Modules, p.verbose), p.env(r)); err != nil {
 		return fmt.Errorf("phase 3 (mise install): %w", err)
+	}
+	listed, err := p.lima.ProvisionOutput(ctx, r.Name,
+		[]byte("export MISE_DATA_DIR="+miseDataDir+"\nmise ls -i -J\n"), p.env(r))
+	if err != nil {
+		return fmt.Errorf("phase 3 (mise ls): %w", err)
+	}
+	p.installed, err = parseMiseList(listed)
+	if err != nil {
+		return fmt.Errorf("phase 3 (mise ls): %w", err)
 	}
 	// Phase 4 — workspace (clone only; mount is already present via virtiofs).
 	if r.Workspace.Mode == config.ModeClone {

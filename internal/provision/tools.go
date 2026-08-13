@@ -2,8 +2,10 @@ package provision
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path"
+	"sort"
 
 	"github.com/MikD1/agent-vm/internal/config"
 )
@@ -56,4 +58,25 @@ func renderMiseInstall(mods []config.ModuleSpec, verbose bool) []byte {
 	fmt.Fprintf(&b, "mise install %s\n", flags)
 	b.WriteString("mise reshim\n")
 	return b.Bytes()
+}
+
+// parseMiseList reads `mise ls -i -J` — an object keyed by tool name, each value
+// a list of installed versions — and flattens it to one entry per tool, sorted by
+// name so the Record is byte-stable between runs.
+func parseMiseList(out []byte) ([]config.ModuleSpec, error) {
+	var raw map[string][]struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, fmt.Errorf("parse `mise ls` output: %w", err)
+	}
+	installed := make([]config.ModuleSpec, 0, len(raw))
+	for name, versions := range raw {
+		if len(versions) == 0 {
+			continue
+		}
+		installed = append(installed, config.ModuleSpec{Name: name, Version: versions[0].Version})
+	}
+	sort.Slice(installed, func(i, j int) bool { return installed[i].Name < installed[j].Name })
+	return installed, nil
 }

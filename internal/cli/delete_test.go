@@ -17,7 +17,9 @@ func (o *okRunner) Run(ctx context.Context, stdin []byte, args ...string) ([]byt
 	if args[0] == "list" {
 		return []byte(""), nil, nil
 	}
-	return nil, nil, nil
+	// "shell" covers both provisioning and the `mise ls -i -J` read-back, whose
+	// output must be valid JSON for parseMiseList.
+	return []byte("{}"), nil, nil
 }
 
 func TestRunDeleteRemovesVMAndRecord(t *testing.T) {

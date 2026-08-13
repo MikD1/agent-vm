@@ -117,6 +117,20 @@ exec bash -euo pipefail -s`
 	return err
 }
 
+// ProvisionOutput is Provision plus the guest's stdout, for scripts whose output
+// avm needs to parse.
+func (c *Client) ProvisionOutput(ctx context.Context, name string, script []byte, env map[string]string) ([]byte, error) {
+	wrapper := `export VM_USER="$1" VM_PROJECT="$2" VM_WORKSPACE="$3" VM_SECRETS="$4"
+export DEBIAN_FRONTEND=noninteractive
+exec bash -euo pipefail -s`
+	args := []string{
+		"shell", "--workdir", "/", name,
+		"sudo", "bash", "-c", wrapper, "--",
+		env["VM_USER"], env["VM_PROJECT"], env["VM_WORKSPACE"], env["VM_SECRETS"],
+	}
+	return c.run(ctx, script, args...)
+}
+
 // Shell runs an interactive shell in the VM at workdir (empty workdir = default).
 // It connects the process stdio directly (not via CommandRunner, which buffers).
 func (c *Client) Shell(ctx context.Context, name, workdir string, extra ...string) error {

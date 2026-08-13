@@ -32,3 +32,33 @@ func TestRenderMiseConfigEmpty(t *testing.T) {
 		t.Errorf("renderMiseConfig(nil) =\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestParseMiseList(t *testing.T) {
+	// Shape of `mise ls -i -J`: an object keyed by tool, each a list of installs.
+	const out = `{
+	  "node": [{"version": "22.14.0", "install_path": "/usr/local/share/mise/installs/node/22.14.0"}],
+	  "go": [{"version": "1.24.0", "install_path": "/usr/local/share/mise/installs/go/1.24.0"}]
+	}`
+	got, err := parseMiseList([]byte(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted by name, so the Record is stable across runs.
+	want := []config.ModuleSpec{{Name: "go", Version: "1.24.0"}, {Name: "node", Version: "22.14.0"}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("parseMiseList() = %+v, want %+v", got, want)
+	}
+}
+
+func TestParseMiseListEmptyAndBad(t *testing.T) {
+	got, err := parseMiseList([]byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("parseMiseList({}) = %+v, want empty", got)
+	}
+	if _, err := parseMiseList([]byte("not json")); err == nil {
+		t.Error("parseMiseList(garbage) = nil error, want an error")
+	}
+}

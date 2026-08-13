@@ -10,15 +10,18 @@ import (
 
 // Record is the host-local materialization of a Project Spec for one Lima VM.
 type Record struct {
-	Name      string                `yaml:"name"`
-	Source    string                `yaml:"source"` // "cli" | "project"
-	CreatedAt time.Time             `yaml:"createdAt"`
-	Base      config.Base           `yaml:"base"`
-	Modules   []config.ModuleSpec   `yaml:"modules"`
-	Resources config.Resources      `yaml:"resources"`
-	User      string                `yaml:"user"`
-	Workspace config.Workspace      `yaml:"workspace"`
-	Mounts    []config.Mount        `yaml:"mounts,omitempty"`
+	Name      string              `yaml:"name"`
+	Source    string              `yaml:"source"` // "cli" | "project"
+	CreatedAt time.Time           `yaml:"createdAt"`
+	Base      config.Base         `yaml:"base"`
+	Modules   []config.ModuleSpec `yaml:"modules"`
+	// InstalledTools is what mise actually resolved, filled in after a successful
+	// provision. Modules is the intent; this is the materialization.
+	InstalledTools []config.ModuleSpec `yaml:"installedTools,omitempty"`
+	Resources      config.Resources    `yaml:"resources"`
+	User           string              `yaml:"user"`
+	Workspace      config.Workspace    `yaml:"workspace"`
+	Mounts         []config.Mount      `yaml:"mounts,omitempty"`
 }
 
 // FromResolved builds a Record from a Resolved config, stamping createdAt.

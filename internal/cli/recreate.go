@@ -66,6 +66,10 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 		}
 		return fmt.Errorf("%w\n%s; record kept. Run `avm recreate %s` to retry", provErr, rollbackMsg, name)
 	}
+	rec.InstalledTools = p.InstalledTools()
+	if err := deps.store.Write(rec); err != nil {
+		fmt.Printf("Warning: could not record installed tool versions: %v\n", err)
+	}
 	fmt.Printf("VM recreated: %s\n", name)
 	return nil
 }
