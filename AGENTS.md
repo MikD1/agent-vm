@@ -27,7 +27,7 @@ certificates, provisioning scripts.
 - **Direct deps:** `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config). Keep the
   dependency set minimal — Lima is the only intended *runtime* dependency.
 - **License:** MIT. Do not add license headers to source files.
-- **Platform:** macOS host only (Lima/virtiofs assumptions). Do not "port" it.
+- **Platform:** macOS and Linux hosts. macOS uses Lima VZ with virtiofs; Linux uses QEMU with 9p. Keep driver and mount transport host-specific, not project-configurable.
 
 ### The three-layer model (memorize this)
 
@@ -479,6 +479,6 @@ git log --oneline origin/main..HEAD
 
 The design deliberately excludes: building/baking images from within the tool
 (`base.image` consumes an already-prepared image); re-applying modules to a running VM
-without recreating it (the model is *change config → `avm recreate`*); importing
-externally-created VMs into the registry; and non-macOS hosts. If a request seems to need
-one of these, flag the tension rather than silently expanding scope.
+without recreating it (the model is *change config → `avm recreate`*); and importing
+externally-created VMs into the registry. If a request seems to need one of these, flag
+the tension rather than silently expanding scope.
