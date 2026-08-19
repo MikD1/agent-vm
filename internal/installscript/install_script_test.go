@@ -174,6 +174,7 @@ func TestInstallScriptInstallsLinuxArchive(t *testing.T) {
 	env.writeFakeUname("Linux", "x86_64")
 	env.writeFakeCurl(curlServe, curlServe)
 	env.writeFakeLimactl()
+	writeExecutableFile(filepath.Join(env.binDir, "shasum"), "#!/bin/sh\nexit 99\n")
 
 	out, err := env.run(root)
 	if err != nil {

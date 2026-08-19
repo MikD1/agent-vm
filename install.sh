@@ -159,7 +159,11 @@ download_and_install() {
   printf '%s\n' "$checksum_line" >"${tmpdir}/checksum"
   (
     cd "$tmpdir"
-    shasum -a 256 -c checksum >/dev/null
+    if [ "$host" = linux ]; then
+      sha256sum -c checksum >/dev/null
+    else
+      shasum -a 256 -c checksum >/dev/null
+    fi
   ) || die "checksum verification failed for ${archive}"
 
   mkdir -p "${tmpdir}/extract"
