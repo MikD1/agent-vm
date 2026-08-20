@@ -1,0 +1,90 @@
+name: Lima E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/lima-e2e.yml"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - "Makefile"
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      LIMA_HOME: ${{ runner.temp }}/lima
+      XDG_CONFIG_HOME: ${{ runner.temp }}/config
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: lima-vm/lima-actions/setup@v1
+        id: lima
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/lima
+          key: lima-${{ steps.lima.outputs.version }}
+      - name: Check KVM
+        run: test -r /dev/kvm && test -w /dev/kvm
+      - name: Build and create VM
+        run: |
+          set -euo pipefail
+          make build
+          mkdir -p "$HOME/.config/agent-vm" "$RUNNER_TEMP/avm-e2e"
+          printf 'modules: []\n' >"$RUNNER_TEMP/avm-e2e/agent-vm.yaml"
+          bin/avm create "$RUNNER_TEMP/avm-e2e"
+          limactl shell avm-e2e -- bash -lc 'id && mise --version && docker --version'
+          bin/avm list
+          bin/avm delete avm-e2e
+          ! limactl list --format '{{.Name}}' | grep -qx avm-e2e
+      - name: Collect Lima logs
+        if: failure()
+        run: |
+          limactl list || true
+          find "$LIMA_HOME" -type f -name '*.log' -print -exec tail -200 {} \; || true
+      - name: Cleanup
+        if: always()
+        run: limactl delete --force avm-e2e || true
+
+  macos-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      LIMA_HOME: ${{ runner.temp }}/lima
+      XDG_CONFIG_HOME: ${{ runner.temp }}/config
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: lima-vm/lima-actions/setup@v1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/lima
+          key: lima-macos
+      - name: Build and create VM
+        run: |
+          set -euo pipefail
+          make build
+          mkdir -p "$HOME/.config/agent-vm" "$RUNNER_TEMP/avm-e2e"
+          printf 'modules: []\n' >"$RUNNER_TEMP/avm-e2e/agent-vm.yaml"
+          bin/avm create "$RUNNER_TEMP/avm-e2e"
+          limactl shell avm-e2e -- bash -lc 'id && mise --version && docker --version'
+          bin/avm delete avm-e2e
+      - name: Collect Lima logs
+        if: failure()
+        run: |
+          limactl list || true
+          find "$LIMA_HOME" -type f -name '*.log' -print -exec tail -200 {} \; || true
+      - name: Cleanup
+        if: always()
+        run: limactl delete --force avm-e2e || true
