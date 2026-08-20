@@ -12,11 +12,6 @@ disk: "120GiB"
 
 mountType: "virtiofs"
 
-mounts:
-  - location: "~/.config/agent-vm"
-    mountPoint: "/mnt/host/agent-vm"
-    writable: false
-
 ssh:
   loadDotSSHPubKeys: true
   forwardAgent: false

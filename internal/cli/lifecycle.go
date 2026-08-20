@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/MikD1/agent-vm/internal/lima"
-	"github.com/MikD1/agent-vm/internal/registry"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +20,7 @@ func cwd() string {
 func newShellCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "shell [name]",
-		Short: "Open a shell in the VM (at the workspace dir)",
+		Short: "Open a shell in the VM",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			arg := ""
@@ -33,23 +32,9 @@ func newShellCmd() *cobra.Command {
 				return err
 			}
 			c := newLimaClient(cmd)
-			workdir := workspaceDir(name)
-			return c.Shell(cmd.Context(), name, workdir)
+			return c.Shell(cmd.Context(), name, "")
 		},
 	}
-}
-
-// workspaceDir returns the guest workspace path from the Record, or "" if none.
-func workspaceDir(name string) string {
-	root, err := registry.DefaultRoot()
-	if err != nil {
-		return ""
-	}
-	rec, err := registry.NewStore(root).Read(name)
-	if err != nil {
-		return ""
-	}
-	return rec.Workspace.GuestPath
 }
 
 func lifecycleCmd(use, short string, fn func(*lima.Client, context.Context, string) error) *cobra.Command {

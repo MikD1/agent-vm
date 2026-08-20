@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/vmname"
 	"gopkg.in/yaml.v3"
 )
@@ -53,18 +54,23 @@ func guestHome(infoJSON []byte, vmUser string) (string, error) {
 	return "/home/" + vmUser + ".linux", nil
 }
 
-// resolveTargetName implements the uniform target rule: explicit arg > cwd spec >
-// error. dir is the working directory (cwd) to inspect when name is empty.
+// resolveTargetName implements the uniform target rule: explicit arg > the VM
+// directory's spec in cwd > error. dir is the working directory to inspect when
+// name is empty.
 func resolveTargetName(name, dir string) (string, error) {
 	if name != "" {
 		return vmname.Normalize(name)
 	}
-	spec := filepath.Join(dir, ".agent-vm.yaml")
-	if _, err := os.Stat(spec); err != nil {
+	specPath := filepath.Join(dir, "agent-vm.yaml")
+	if _, err := os.Stat(specPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("no .agent-vm.yaml in %s; pass a VM name or cd into a project", dir)
+			return "", fmt.Errorf("no agent-vm.yaml in %s; pass a VM name or cd into a VM directory", dir)
 		}
 		return "", err
 	}
-	return vmname.Normalize(filepath.Base(dir))
+	spec, err := config.Load(specPath)
+	if err != nil {
+		return "", err
+	}
+	return vmName(spec, dir)
 }

@@ -2,9 +2,30 @@ package cli
 
 import (
 	"github.com/MikD1/agent-vm/internal/config"
+	"github.com/MikD1/agent-vm/internal/provision"
 	"github.com/MikD1/agent-vm/internal/templates"
 	"gopkg.in/yaml.v3"
 )
+
+// limaMounts renders the full mount list for one VM: the VM directory read-only
+// first, then one read/write mount per project. It takes the two fields it needs
+// rather than a Resolved, so both create (from Resolved) and the runtime mount
+// sync (from a Record) can produce an identical list.
+func limaMounts(configDir string, mounts []config.Mount) []any {
+	out := []any{map[string]any{
+		"location":   configDir,
+		"mountPoint": provision.GuestConfigMount,
+		"writable":   false,
+	}}
+	for _, m := range mounts {
+		out = append(out, map[string]any{
+			"location":   m.HostPath,
+			"mountPoint": m.GuestPath,
+			"writable":   true,
+		})
+	}
+	return out
+}
 
 // buildLimaConfig renders the per-VM Lima YAML from the embedded base template
 // plus the resolved config. guestHome sets the user home path.
@@ -19,21 +40,7 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 	doc["memory"] = r.Resources.Memory
 	doc["disk"] = r.Resources.Disk
 	doc["user"] = map[string]string{"name": r.User, "home": guestHome}
-
-	mounts, _ := doc["mounts"].([]any)
-	mounts = append(mounts, map[string]any{
-		"location":   r.Workspace.HostPath,
-		"mountPoint": r.Workspace.GuestPath,
-		"writable":   true,
-	})
-	for _, m := range r.Mounts {
-		mounts = append(mounts, map[string]any{
-			"location":   m.HostPath,
-			"mountPoint": m.GuestPath,
-			"writable":   true,
-		})
-	}
-	doc["mounts"] = mounts
+	doc["mounts"] = limaMounts(r.ConfigDir, r.Mounts)
 
 	return yaml.Marshal(doc)
 }

@@ -47,14 +47,22 @@ func TestResolveTargetName(t *testing.T) {
 	if err != nil || n != "my-api" {
 		t.Fatalf("explicit = %q, %v", n, err)
 	}
-	// from cwd basename when a spec exists
+	// from the directory basename when a spec exists and sets no name
 	dir := t.TempDir()
 	specDir := dir + "/Cool_Proj"
 	_ = osMkdirAll(specDir)
-	_ = osWriteFile(specDir+"/.agent-vm.yaml", "modules: []\n")
+	_ = osWriteFile(specDir+"/agent-vm.yaml", "modules: []\n")
 	n2, err := resolveTargetName("", specDir)
 	if err != nil || n2 != "cool-proj" {
 		t.Fatalf("cwd = %q, %v", n2, err)
+	}
+	// the spec's own name wins over the folder name
+	namedDir := dir + "/some-folder"
+	_ = osMkdirAll(namedDir)
+	_ = osWriteFile(namedDir+"/agent-vm.yaml", "name: Work_Domain\nmodules: []\n")
+	n3, err := resolveTargetName("", namedDir)
+	if err != nil || n3 != "work-domain" {
+		t.Fatalf("named = %q, %v", n3, err)
 	}
 	// error when no arg and no spec
 	if _, err := resolveTargetName("", dir); err == nil {
@@ -74,5 +82,5 @@ func TestGuestHomeRealistic(t *testing.T) {
 	}
 }
 
-func osMkdirAll(p string) error        { return os.MkdirAll(p, 0o755) }
-func osWriteFile(p, s string) error    { return os.WriteFile(p, []byte(s), 0o644) }
+func osMkdirAll(p string) error     { return os.MkdirAll(p, 0o755) }
+func osWriteFile(p, s string) error { return os.WriteFile(p, []byte(s), 0o644) }

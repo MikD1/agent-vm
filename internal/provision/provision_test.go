@@ -32,12 +32,13 @@ func ops(r *recorder) []string {
 
 func baseResolved() config.Resolved {
 	return config.Resolved{
-		Name:      "my-api",
+		Name:      "work",
 		Modules:   []config.ModuleSpec{{Name: "node", Version: "lts"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		User:      "me",
-		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me.linux/my-api"},
+		ConfigDir: "/Users/me/vms/work",
+		Home:      "/home/me.linux",
 	}
 }
 
@@ -74,7 +75,7 @@ func TestPlanFilesPhase(t *testing.T) {
 	rec := &recorder{}
 	r := baseResolved()
 	r.Files = []config.FileCopy{
-		{Root: config.RootWorkspace, Rel: "settings.json", To: "/home/me.linux/.claude/settings.json", Mode: "0644"},
+		{Rel: "settings.json", To: "/home/me.linux/.claude/settings.json", Mode: "0644"},
 	}
 	p := New(lima.New(rec), false)
 	if err := p.Run(context.Background(), r, "/tmp/cfg.yaml"); err != nil {
@@ -82,7 +83,7 @@ func TestPlanFilesPhase(t *testing.T) {
 	}
 	var sawCopy bool
 	for _, in := range rec.stdin {
-		if strings.Contains(in, `cp -R "${VM_WORKSPACE}"/'settings.json'`) {
+		if strings.Contains(in, `cp -R "${VM_CONFIG}"/'settings.json'`) {
 			sawCopy = true
 		}
 	}
@@ -204,5 +205,24 @@ func TestRenderMiseInstall(t *testing.T) {
 	}
 	if v := string(renderMiseInstall(nil, true)); !strings.Contains(v, "mise install -y --verbose") {
 		t.Errorf("verbose install missing --verbose:\n%s", v)
+	}
+}
+
+// TestEnvContractIsThreeVariables pins the contract shape at its source.
+func TestEnvContractIsThreeVariables(t *testing.T) {
+	p := New(lima.New(&recorder{}), false)
+	env := p.env(baseResolved())
+	want := map[string]string{
+		"VM_USER":   "me",
+		"VM_HOME":   "/home/me.linux",
+		"VM_CONFIG": "/mnt/host/vm",
+	}
+	if len(env) != len(want) {
+		t.Fatalf("env = %v, want exactly %v", env, want)
+	}
+	for k, v := range want {
+		if env[k] != v {
+			t.Errorf("env[%q] = %q, want %q", k, env[k], v)
+		}
 	}
 }

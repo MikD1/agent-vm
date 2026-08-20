@@ -1,12 +1,12 @@
 # agent-vm — Architecture
 
-`agent-vm` provisions isolated Linux development VMs on macOS via [Lima](https://lima-vm.io/) — one VM per project, each carrying only the tools that project selects. The system is organized as three layers with narrow interfaces: a **Go CLI** orchestrates, **Lima** virtualizes, and **bash** provisions inside the guest.
+`agent-vm` provisions isolated Linux development VMs on macOS via [Lima](https://lima-vm.io/) — one VM per domain of work, described by its own folder on the host, each carrying only the tools that domain selects. The system is organized as three layers with narrow interfaces: a **Go CLI** orchestrates, **Lima** virtualizes, and **bash** provisions inside the guest.
 
 ## Design principles
 
 - **Three clean layers.** Go orchestrates, Lima virtualizes, bash provisions. Each speaks to the next through a narrow, stable interface.
 - **Modules are tool references, not scripts.** A module is a [mise](https://mise.jdx.dev/) tool name plus an optional version; installing it is one `mise install` line, not bash the project owns. Cross-cutting concerns (certificates, trust, global env, Docker, mise itself) are applied by platform phases that run *around* the tools phase, never by a module.
-- **Declarative source vs realized state.** A portable, version-controlled *Project Spec* expresses intent; a host-local *VM Record* is its materialization. This mirrors the manifest-vs-lockfile / Terraform config-vs-state pattern.
+- **Declarative source vs realized state.** A portable, human-authored *VM Spec* expresses intent; a host-local *VM Record* is its materialization. This mirrors the manifest-vs-lockfile / Terraform config-vs-state pattern.
 - **One managed VM ⇔ one registry record.** They live and die together; divergence (drift) is detected and reconciled, never assumed away.
 - **Single self-contained binary.** Provisioning scripts and templates are embedded into the binary; the guest additionally installs a pinned mise release, so the only runtime dependency on the host stays Lima.
 
@@ -20,14 +20,16 @@ graph TB
         cli["avm — Go CLI / orchestrator"]
         subgraph Store["~/.config/agent-vm/ (host store)"]
             registry["vms/&lt;name&gt;.yaml<br/><i>VM Records (registry)</i>"]
-            ca["ca-certificates/<br/><i>root CAs (PEM)</i>"]
-            gitcfg[".gitconfig<br/><i>sanitized git config</i>"]
         end
-        spec[".agent-vm.yaml<br/><i>Project Spec (in repo, required)</i>"]
+        subgraph VMDir["&lt;vm-dir&gt;/ (VM directory)"]
+            spec["agent-vm.yaml<br/><i>VM Spec (required)</i>"]
+            ca["ca-certificates/<br/><i>root CAs (PEM)</i>"]
+            cfgfiles["files sources<br/><i>agent settings, credentials</i>"]
+        end
     end
 
     subgraph Lima["Lima (virtualization backend)"]
-        limactl["limactl<br/>create / start / shell / copy / list / delete"]
+        limactl["limactl<br/>create / start / shell / edit / list / delete"]
     end
 
     subgraph Guest["Guest VM"]
@@ -43,12 +45,12 @@ graph TB
     end
 
     cli -- "reads / writes" --> registry
-    cli -- "reads" --> spec
+    cli -- "reads / writes" --> spec
     cli -- "shell-out (CLI contract)" --> limactl
     limactl -- "provisions" --> Guest
-    Store -. "RO virtiofs mount<br/>/mnt/host/agent-vm" .-> Guest
+    VMDir -. "RO virtiofs mount<br/>/mnt/host/vm" .-> Guest
     ca -. "source for" .-> p1
-    spec -. "source for" .-> p4
+    cfgfiles -. "source for" .-> p4
 ```
 
 **Layer boundaries:**
@@ -79,7 +81,8 @@ Go is the language of the CLI orchestrator.
 graph TD
     main["cmd/avm/main.go"]
     cli["internal/cli<br/>cobra commands"]
-    config["internal/config<br/>Project Spec parse + validate"]
+    config["internal/config<br/>VM Spec parse + validate"]
+    specedit["internal/specedit<br/>comment-preserving spec edits"]
     registry["internal/registry<br/>VM Records (host store)"]
     lima["internal/lima<br/>limactl wrapper"]
     provision["internal/provision<br/>phase planner + go:embed platform scripts"]
@@ -87,45 +90,48 @@ graph TD
 
     main --> cli
     cli --> config
+    cli --> specedit
     cli --> registry
     cli --> provision
     cli --> vmname
+    specedit --> config
     provision --> lima
-    registry --> lima
-    config --> vmname
 ```
 
 Dependency rule: `internal/lima` is the only package that knows about `limactl`; everything else speaks in domain types. `internal/provision` embeds its own platform scripts (`internal/provision/scripts/*.sh`) and renders the `mise install` invocation and the `files`/`scripts` phases directly from the resolved config — there is no separate module-runner package.
 
 `internal/lima`'s `ExecRunner` filters `limactl`'s logrus-formatted stderr before it reaches the terminal: normal mode shows only warnings and errors, `--verbose` shows every line, and both strip the `time=…level=…` prefix (and trailing key=value fields) down to the message text. The raw stderr is still captured separately to build error messages.
 
-## 3. Configuration Model: Project Spec vs VM Record
+## 3. Configuration Model: VM Spec vs VM Record
 
 The system has **two** config artifacts with distinct, non-overlapping roles. This separation is the backbone of the registry invariant.
 
-| | `.agent-vm.yaml` — **Project Spec** | `~/.config/agent-vm/vms/<name>.yaml` — **VM Record** |
+| | `agent-vm.yaml` — **VM Spec** | `~/.config/agent-vm/vms/<name>.yaml` — **VM Record** |
 |---|---|---|
 | Author | human | the tool |
-| Location | in the repo, under version control | host-local, never shared |
-| Role | *intent* — what kind of VM this project wants | *materialization* — what VM actually exists on this host |
-| Contains | modules, resources, `files`, `scripts`, `base.image` | the resolved spec **plus** create-time facts: absolute host path + in-guest path, resolved base image, VM name, created-at, resolved `files` entries, `scripts` paths, and `installedTools` — the tool versions mise actually resolved |
-| Portable | **yes** — moves config between people and machines | no — local instance state |
+| Location | in the VM's own folder | host-local, never shared |
+| Role | *intent* — what kind of VM this domain of work wants | *materialization* — what VM actually exists on this host |
+| Contains | `name`, `modules`, `resources`, `mounts`, `files`, `scripts`, `base.image` | `configDir`, `home`, `mounts`, resolved `files`, `scripts`, `installedTools`, resolved base image, VM name, created-at |
+| Portable | **yes** — between machines where the projects live at the same paths | no — local instance state |
 | May be absent | no — `avm create` requires it | no — always present for a managed VM |
 
-The Project Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec and writes a Record. Because the Record is self-contained, `recreate`, `list`, and reconciliation work **without** the repo or the current directory.
+The VM Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec and writes a Record. Because the Record is self-contained, `recreate`, `list`, and reconciliation work **without** the VM directory or the current directory.
 
 **Config resolution order (one mental model for `avm create`):**
 
 ```
-flags  >  in-repo .agent-vm.yaml  >  built-in defaults
+flags  >  agent-vm.yaml  >  built-in defaults
 ```
 
-**Transferring config between users** goes through the Project Spec, never the Record. A colleague checks out the repo and runs `avm create` to get an equivalent VM — the in-repo file is required for this.
+**Transferring config between users** goes through the VM Spec, never the
+Record. A colleague copies the VM folder and runs `avm create` to get an
+equivalent VM, provided their projects live at the paths `mounts` names.
 
-### Example — Project Spec (`.agent-vm.yaml`)
+### Example — VM Spec (`agent-vm.yaml`)
 
 ```yaml
-# Authored by a human, committed to the repo.
+# Authored by a human, lives in the VM's folder.
+name: work
 modules:
   - node: lts
   - claude
@@ -133,34 +139,37 @@ resources:
   cpus: 4
   memory: 8GiB
   disk: 120GiB
+mounts:
+  - ~/projects/api
+  - ~/projects/web
 files:
   claude-settings.json: ~/.claude/settings.json
 scripts:
   - provision/postgres.sh
-# Optional: pin a base image (e.g. a corporate one). Defaults to Ubuntu.
-# base:
-#   image: corp-ubuntu-2204-hardened
 ```
 
-The Spec carries **no** workspace paths — the host path is the directory `avm create` runs in, and both it and the derived guest path are recorded only in the VM Record.
+Mount paths are absolute or `~/`-prefixed: a VM's contents must not depend on
+where its folder sits. The absolute path of the folder itself is a create-time
+fact and is recorded as `configDir` in the VM Record.
 
-### Example — VM Record (`~/.config/agent-vm/vms/my-api.yaml`)
+### Example — VM Record (`~/.config/agent-vm/vms/work.yaml`)
 
 ```yaml
 # Generated by the tool. Host-local. Mirrors one Lima VM 1:1.
-name: my-api
+name: work
 createdAt: "2026-06-14T12:00:00Z"
 user: m_doshevsky           # resolved guest Linux username
+configDir: /Users/me/vms/work
+home: /home/m_doshevsky.linux
 base:
   image: template:_images/ubuntu
 modules: [{ node: lts }, claude]
 installedTools: [{ node: 22.9.0 }, { claude: 2.1.4 }]  # what mise actually resolved
 resources: { cpus: 4, memory: 8GiB, disk: 120GiB }
-workspace:
-  hostPath: /Users/me/projects/my-api
-  guestPath: /home/user.linux/my-api
+mounts:
+  - { hostPath: /Users/me/projects/api, guestPath: /home/m_doshevsky.linux/api }
 files:
-  - { root: workspace, rel: claude-settings.json, to: ~/.claude/settings.json }
+  - { rel: claude-settings.json, to: ~/.claude/settings.json }
 scripts:
   - provision/postgres.sh
 ```
@@ -188,7 +197,7 @@ sequenceDiagram
     Note over Guest: one rendered `mise install` for every module in the spec;<br/>`mise ls -i -J` reports back the resolved versions
 
     CLI->>Guest: Phase 4 — config files (sudo bash -s)
-    Note over Guest: copy each `files` entry from its mount to its guest destination
+    Note over Guest: copy each `files` entry from /mnt/host/vm to its guest destination
 
     loop each entry in spec order
         CLI->>Guest: Phase 5 — user script (sudo bash -s, env contract)
@@ -206,9 +215,8 @@ Each provisioning script runs as root, with `DEBIAN_FRONTEND=noninteractive`, fe
 | Variable | Value | Notes |
 |----------|-------|-------|
 | `VM_USER` | unprivileged guest user | for `sudo -u` and `usermod` |
-| `VM_PROJECT` | project / VM name | naming, labels |
-| `VM_WORKSPACE` | absolute path to the code in the guest | mount point of the host project directory |
-| `VM_SECRETS` | `/mnt/host/agent-vm` (read-only) | source root for `files` entries anchored under `~/.config/agent-vm/` |
+| `VM_HOME` | the guest home | the root of every mounted project |
+| `VM_CONFIG` | `/mnt/host/vm` (read-only) | the VM directory: source root for `files` entries and `ca-certificates/` |
 
 Certificates are deliberately *not* in this contract. No platform script or `files`/`scripts` entry reads `ca-certificates/` or sets `NODE_EXTRA_CA_CERTS` — the system layer (Phase 1) has already configured trust globally before anything else runs. This is the concrete mechanism by which tools know nothing about certificates.
 
@@ -219,7 +227,7 @@ Two cooperating levels.
 ```mermaid
 graph TB
     subgraph Host
-        hostca["~/.config/agent-vm/ca-certificates/*.pem"]
+        hostca["&lt;vm-dir&gt;/ca-certificates/*.pem"]
         baseimg["base.image<br/>(default Ubuntu OR corporate image)"]
     end
 
@@ -238,13 +246,13 @@ graph TB
     env -- "inherited, never referenced" --> Tools
 ```
 
-At the **image level**, `base.image` may point at a pre-built corporate image that already carries its own trust configuration; the tool builds on top of it. At the **provision level**, the Phase 1 system layer always installs host-provided CAs from `~/.config/agent-vm/ca-certificates/` into the system trust store and exports trust env vars globally — both in `/etc/profile.d` (login shells: SSH, VS Code) and `/etc/environment` (non-login shells: `limactl shell`). Every later tool inherits trust with no per-tool code. The tool does not build images; `base.image` consumes an already-prepared image.
+At the **image level**, `base.image` may point at a pre-built corporate image that already carries its own trust configuration; the tool builds on top of it. At the **provision level**, the Phase 1 system layer always installs host-provided CAs from the VM directory's ca-certificates/ into the system trust store and exports trust env vars globally — both in `/etc/profile.d` (login shells: SSH, VS Code) and `/etc/environment` (non-login shells: `limactl shell`). Every later tool inherits trust with no per-tool code. The tool does not build images; `base.image` consumes an already-prepared image.
 
 ## 7. VM Registry & Lifecycle
 
 The registry (`~/.config/agent-vm/vms/<name>.yaml`) holds one VM Record per managed VM. The governing invariant: a managed VM and its registry Record live and die together — there is no Record without a VM, and no managed VM without a Record.
 
-The invariant is a *goal* maintained by a *reconciliation mechanism*, because the world can diverge (someone runs `limactl delete` directly). The source of truth is split: **Lima** owns *existence* (does the VM live?), and the **Registry** owns *definition* (modules, resources, base image, workspace paths). Every command reconciles the two and surfaces drift rather than trusting that state is always consistent.
+The invariant is a *goal* maintained by a *reconciliation mechanism*, because the world can diverge (someone runs `limactl delete` directly). The source of truth is split: **Lima** owns *existence* (does the VM live?), and the **Registry** owns *definition* (modules, resources, base image, mounts). Every command reconciles the two and surfaces drift rather than trusting that state is always consistent.
 
 `avm create` writes the VM Record **first**, then builds the VM. On any provisioning failure the VM artifact is deleted (rolled back) but the Record is kept → `OrphanedRecord`, recovered via `recreate`/`prune`. `avm create` refuses a name that already has a Record.
 
@@ -277,36 +285,75 @@ stateDiagram-v2
 
 `avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine): the mounted host folders are untouched, but anything living only inside the guest — state outside mise, Docker volumes, files written to guest-only directories — is gone. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
 
-## 8. Workspace
+## 8. Mounts
 
-The host project directory is virtiofs-mounted into the guest, writable, at `guestPath` (`~/<project>` in the guest home). Config comes from the in-repo `.agent-vm.yaml`. Git division of labor: commit/diff/branch in the VM; push/pull on the host where credentials live. A Record is written for every VM, so it stays manageable by name from anywhere.
+Every entry in `mounts` is equal: there is no main project and no privileged
+mount. Each host folder is virtiofs-mounted read/write at `~/<name>` in the
+guest, where `name` defaults to the folder's basename and can be overridden per
+entry when two projects share one. Alongside them, the VM's own directory is
+mounted **read-only** at `/mnt/host/vm` — the single service mount, and the only
+host folder the guest can read besides the projects themselves.
 
-**Additional mounts.** Beyond the primary workspace, a VM may mount extra host folders declared in the Spec (`mounts:`, relative paths — portable intent) or via repeatable `--mount` flags. Each resolves to an absolute host path and a guest mount point `~/<name>` recorded in the VM Record (materialization). They are always writable and need no provisioning — Lima mounts them at start.
+Git division of labor: commit/diff/branch in the VM; push/pull on the host where
+credentials live.
+
+**Runtime changes.** `avm mount` and `avm unmount` attach and detach a project
+without recreating the VM. Both write all three artifacts that describe it — the
+VM Spec, the Record, and the Lima instance — so none can silently drift from the
+others. The Spec is edited through `yaml.Node`, preserving the explanatory
+comments `avm init` ships.
+
+Synchronization with Lima is **convergent**, not incremental: the whole list is
+rendered from the Record and applied via `limactl edit --set '.mounts = […]'`.
+A single convergent primitive serves mount, unmount, and a hand-edited config
+alike, instead of three partial ones.
+
+`limactl edit` refuses to operate on a running instance, so the edit can only
+happen while the VM is stopped — which also matches the runtime constraint that
+Lima attaches virtiofs devices at boot, with no supported way to add one to a
+live guest. The two cases are therefore:
+
+- **VM stopped (or absent):** edit the config directly; the new list is attached
+  on the next boot. No prompt.
+- **VM running:** prompt *before* touching Lima. On accept, `stop → edit →
+  start`. On decline, Lima is not touched at all — the VM Spec and the Record
+  are already updated, but the change is not applied, and a plain `avm restart`
+  will *not* converge it (`avm restart` is a bare `limactl restart` and never
+  calls this path). Applying it later means stopping the VM and re-running
+  `avm mount`/`avm unmount`, or `avm recreate <name>`.
 
 ## 9. Command Surface
 
 | Command | Behavior |
 |---------|----------|
-| `avm init [--modules=… --cpus=… --memory=… --disk=…]` | Write a `.agent-vm.yaml` Project Spec (optionally pre-filled). |
-| `avm create [path]` | Create + provision the VM from the project directory's Spec; write Record + create VM. Add `--mount PATH` (repeatable) for extra host folders. |
+| `avm init [path]` | Write an `agent-vm.yaml` VM Spec template. |
+| `avm create [path]` | Create + provision the VM from a VM directory's Spec; write Record + create VM. |
 | `avm recreate <name>` | Pristine rebuild of the VM from its Record. |
-| `avm list` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged and show runtime state. |
-| `avm shell <name>` | Open a shell in the VM (defaults to the workspace dir). |
-| `avm start / stop / restart <name>` | Lifecycle controls. |
+| `avm list [name]` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged. With a name, show that VM's mounts and tools. |
+| `avm mount <vm> [path]` | Attach a project folder; updates Spec, Record and the running VM. |
+| `avm unmount <vm> <path\|name>` | Detach a project folder. |
+| `avm shell [name]` | Open a shell in the VM (at the guest home). |
+| `avm start / stop / restart [name]` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM **and** remove its Record. |
 | `avm prune [name]` | Remove orphaned records (record without a VM). |
 
 ### Target resolution (uniform across all `avm *` commands)
 
 ```
-1. explicit name argument           e.g. `avm shell my-api`
-2. else .agent-vm.yaml in cwd       e.g. `avm shell`  (name = dir basename)
+1. explicit name argument           e.g. `avm shell work`
+2. else agent-vm.yaml in cwd        e.g. `avm shell`  (name from `name:`, else dir basename)
 3. else error
 ```
 
+`avm mount` / `avm unmount` require the name explicitly: they are run from a
+project folder, which is not the VM's directory.
+
 ### Flags
 
-Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=…` takes mise tool references, e.g. `--modules=node@lts,go@1.24`. `--base-image=…` overrides the default base image.
+Resource flags are `--cpus`, `--memory`, `--disk`. `--modules=…` takes mise tool
+references, e.g. `--modules=node@lts,go@1.24`. `--base-image=…` overrides the
+default base image. `avm mount --name <name>` sets the guest directory name when
+two projects would otherwise collide.
 
 When no `--modules` flag is set and the Spec has no `modules` key, the built-in default modules `[node, claude]` are installed.
 
@@ -315,21 +362,27 @@ When no `--modules` flag is set and the Spec has no `modules` key, the built-in 
 ```
 cmd/avm/main.go             entrypoint
 internal/
-  cli/                      cobra commands
-  config/                   Project Spec schema + validation
+  cli/                      cobra commands (incl. mount.go, mountsync.go)
+  config/                   VM Spec schema + validation
+  specedit/                 comment-preserving edits to agent-vm.yaml
   registry/                 VM Records (host store) + reconciliation
   lima/                     limactl wrapper (only limactl-aware package)
   provision/                phase planner + go:embed platform scripts
   vmname/                   name normalization / validation
 internal/provision/scripts/*.sh   platform provisioning scripts (go:embed'd into internal/provision)
-internal/templates/files/*        Lima base template + spec template (go:embed'd into internal/templates)
+internal/templates/files/*        Lima base template + agent-vm.yaml spec template
 ```
 
 The platform provisioning scripts and both templates are embedded into the binary, so `avm` ships as a single file. Per-tool installation needs no code or embedded script of its own — it is a `modules` entry that mise resolves at provision time.
 
 ## 11. Non-goals
 
-The architecture deliberately does not include: building derived/baked images from within the tool (`base.image` consumes an already-prepared image instead); re-applying modules to a running VM without recreating it (the model is "change config → `avm recreate`"); importing externally-created VMs into the registry; and non-macOS hosts (Lima/virtiofs assumptions hold).
+The architecture deliberately does not include: building derived/baked images
+from within the tool (`base.image` consumes an already-prepared image instead);
+re-applying modules to a running VM without recreating it (the model is "change
+config → `avm recreate`"); hot-attaching a mount without a restart (Lima
+attaches virtiofs devices at boot); importing externally-created VMs into the
+registry; and non-macOS hosts (Lima/virtiofs assumptions hold).
 
 ## 12. Key Decisions
 
@@ -342,6 +395,7 @@ The architecture deliberately does not include: building derived/baked images fr
 | D5 | Config parsed natively in Go; Lima is the only runtime dependency. |
 | D6 | Certificates handled by a Phase 1 system layer + global env; modules are unaware. |
 | D7 | Support a corporate `base.image`; the tool does not build images. |
-| D8 | Two-artifact config model: portable Project Spec vs host-local VM Record. |
+| D8 | Two-artifact config model: portable VM Spec vs host-local VM Record. |
 | D9 | Host registry with a Record ⇔ VM invariant, maintained by reconciliation. |
 | D10 | Unified `avm create` (flags > in-repo file > defaults); uniform target resolution. |
+| D11 | Mounts converge Record → Lima by rewriting the whole list, not by attaching incrementally. `limactl edit` only works on a stopped instance, so a stopped VM is edited in place, while a running one is `stop → edit → start` behind a confirmation prompt; declining touches Lima not at all. |

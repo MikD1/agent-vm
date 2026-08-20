@@ -8,7 +8,7 @@ import (
 	"github.com/MikD1/agent-vm/internal/config"
 )
 
-// Record is the host-local materialization of a Project Spec for one Lima VM.
+// Record is the host-local materialization of a VM Spec for one Lima VM.
 type Record struct {
 	Name      string              `yaml:"name"`
 	CreatedAt time.Time           `yaml:"createdAt"`
@@ -19,10 +19,20 @@ type Record struct {
 	InstalledTools []config.ModuleSpec `yaml:"installedTools,omitempty"`
 	Resources      config.Resources    `yaml:"resources"`
 	User           string              `yaml:"user"`
-	Workspace      config.Mount        `yaml:"workspace"`
-	Mounts         []config.Mount      `yaml:"mounts,omitempty"`
-	Files          []config.FileCopy   `yaml:"files,omitempty"`
-	Scripts        []string            `yaml:"scripts,omitempty"`
+	// ConfigDir is the absolute host path of the VM directory. Without it `avm
+	// mount`, run from a project folder, could not find the config to update.
+	ConfigDir string `yaml:"configDir"`
+	// Home is the guest home resolved at create time. `avm mount` needs it to
+	// build a new mount's guest path: `limactl info` reports the home of the
+	// template, not of this VM, so reading it later would depend on the Lima
+	// version installed at that moment. The Record is a snapshot of creation
+	// facts, and home is one of them.
+	Home string `yaml:"home"`
+	// Mounts carries no omitempty: an empty mount list is a valid and meaningful
+	// state, and it should be visible in the file.
+	Mounts  []config.Mount    `yaml:"mounts"`
+	Files   []config.FileCopy `yaml:"files,omitempty"`
+	Scripts []string          `yaml:"scripts,omitempty"`
 }
 
 // FromResolved builds a Record from a Resolved config, stamping createdAt.
@@ -34,7 +44,8 @@ func FromResolved(r config.Resolved, createdAt time.Time) Record {
 		Modules:   r.Modules,
 		Resources: r.Resources,
 		User:      r.User,
-		Workspace: r.Workspace,
+		ConfigDir: r.ConfigDir,
+		Home:      r.Home,
 		Mounts:    r.Mounts,
 		Files:     r.Files,
 		Scripts:   r.Scripts,

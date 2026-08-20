@@ -2,7 +2,7 @@
 set -euo pipefail
 # Phase 2 — mise, the single tool manager behind every module.
 # Installs mise system-wide and puts its shim directory into every shell context.
-# Contract: MISE_VERSION plus VM_USER, VM_PROJECT, VM_WORKSPACE, VM_SECRETS.
+# Contract: MISE_VERSION plus VM_USER, VM_HOME, VM_CONFIG.
 # Certificates are NOT handled here — the Phase 1 system layer already configured
 # trust globally, and mise honors the system store (its default build links
 # native-tls, i.e. OpenSSL, on Linux).

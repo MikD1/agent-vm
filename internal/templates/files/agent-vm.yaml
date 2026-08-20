@@ -1,3 +1,6 @@
+# The name of this VM. Defaults to the name of the folder this file sits in.
+# name: work
+
 # Tools for this VM. Every entry is a mise tool: a name, optionally with a
 # version. A name with no version installs the latest release, so pin what you
 # care about. Anything in the mise registry works, as do backend references like
@@ -15,28 +18,29 @@ resources:
   disk: 120GiB
 
 # Host files to copy into the guest. Sources are relative to this file, or
-# absolute — but they must sit either next to this file or under
-# ~/.config/agent-vm, the two directories the VM can see. Keep credentials in
-# ~/.config/agent-vm so they stay out of the repository.
+# absolute — but they must sit inside this folder: it is the only host directory
+# a files: source can be read from. Keep credentials here, out of any project
+# repository.
 # files:
 #   claude-settings.json: ~/.claude/settings.json
 #   tmux.conf: ~/.tmux.conf
-#   codex-config.toml: ~/.codex/config.toml
-#   ~/.config/agent-vm/codex-auth.json:
+#   codex-auth.json:
 #     to: ~/.codex/auth.json
 #     mode: "0600"
 
 # Bash to run after the tools are installed and the files are in place. Runs as
-# root with VM_USER, VM_PROJECT, VM_WORKSPACE, and VM_SECRETS set. To use a tool
-# mise installed, drop to the VM user's login shell:
+# root with VM_USER, VM_HOME, and VM_CONFIG set. To use a tool mise installed,
+# drop to the VM user's login shell:
 #   sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
 # scripts:
 #   - provision/postgres.sh
 
-# Additional host folders to mount alongside the project (paths relative to this
-# file). Each is mounted read/write at ~/<basename> inside the VM. Use the
-# object form with `name:` to override the guest directory name on a collision.
-# mounts:
-#   - ../shared-lib
-#   - path: ../tools/cli
-#     name: cli-tools
+# The projects this VM works on. Each is mounted read/write at ~/<name>, where
+# name defaults to the folder's basename. Paths must be absolute or start with
+# ~/. Use the {path, name} form when two projects share a basename. You can also
+# attach a project later with `avm mount`.
+#   - ~/projects/api
+#   - /Users/me/work/web
+#   - path: ~/other/api
+#     name: api-legacy
+mounts:

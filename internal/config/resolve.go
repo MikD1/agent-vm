@@ -27,36 +27,24 @@ type Flags struct {
 	BaseImage  string
 }
 
-// Mount is a resolved host→guest folder mapping (materialization): the primary
-// project workspace, or one additional host folder.
+// Mount is a resolved host→guest folder mapping: one project this VM works on,
+// mounted read/write at its guest path.
 type Mount struct {
 	HostPath  string `yaml:"hostPath"`
 	GuestPath string `yaml:"guestPath"`
 }
 
-// MountInput is an already-resolved (absolute) additional host folder fed into
-// Resolve via Env. The CLI layer does relative-path resolution and existence
-// checks, keeping config free of filesystem access.
+// MountInput is an already-resolved (absolute) host folder fed into Resolve via
+// Env. The CLI layer expands ~/ and checks existence, keeping config free of
+// filesystem access.
 type MountInput struct {
 	HostPath string
 	Name     string
 }
 
-// FileRoot names which mounted directory a `files` source lives under. Sources
-// are copied inside the guest, so they must be visible there.
-type FileRoot string
-
-const (
-	// RootWorkspace is the project directory, mounted at VM_WORKSPACE.
-	RootWorkspace FileRoot = "workspace"
-	// RootSecrets is the host store ~/.config/agent-vm, mounted read-only at VM_SECRETS.
-	RootSecrets FileRoot = "secrets"
-)
-
-// FileInput is one `files` entry after the CLI has classified its root and
-// checked it exists. To is still in ~/ form; Resolve expands it.
+// FileInput is one `files` entry after the CLI has checked it exists. Rel is the
+// path relative to the VM directory; To is still in ~/ form, and Resolve expands it.
 type FileInput struct {
-	Root  FileRoot
 	Rel   string
 	To    string
 	Mode  string
@@ -64,22 +52,21 @@ type FileInput struct {
 }
 
 // FileCopy is a resolved `files` entry: an absolute guest destination plus the
-// root and relative path the guest reconstructs its source from.
+// path relative to the VM directory that the guest reconstructs its source from.
 type FileCopy struct {
-	Root  FileRoot `yaml:"root"`
-	Rel   string   `yaml:"rel"`
-	To    string   `yaml:"to"`
-	Mode  string   `yaml:"mode,omitempty"`
-	IsDir bool     `yaml:"isDir,omitempty"`
+	Rel   string `yaml:"rel"`
+	To    string `yaml:"to"`
+	Mode  string `yaml:"mode,omitempty"`
+	IsDir bool   `yaml:"isDir,omitempty"`
 }
 
-// Env carries facts resolved outside config: the normalized project/VM name, the
-// guest user/home (from `limactl info`), and the host project path.
+// Env carries facts resolved outside config: the normalized VM name, the guest
+// user/home (from `limactl info`), and the host path of the VM directory.
 type Env struct {
 	ProjectName string
 	GuestUser   string
 	GuestHome   string
-	HostPath    string
+	ConfigDir   string
 	Mounts      []MountInput
 	Files       []FileInput
 	Scripts     []string
@@ -93,7 +80,8 @@ type Resolved struct {
 	Resources Resources
 	Base      Base
 	User      string
-	Workspace Mount
+	ConfigDir string
+	Home      string
 	Mounts    []Mount
 	Files     []FileCopy
 	Scripts   []string
@@ -103,6 +91,13 @@ type Resolved struct {
 // are not checked against a catalog: avm does not know the mise registry offline,
 // so an unknown name surfaces when mise runs.
 func (s Spec) Validate() error {
+	if s.Name != "" {
+		// ValidateMountName's message already names the offending value and the
+		// rule, so it is returned as-is rather than restated.
+		if err := ValidateMountName(s.Name); err != nil {
+			return err
+		}
+	}
 	if s.Modules != nil {
 		seen := map[string]bool{}
 		for _, m := range *s.Modules {
@@ -131,9 +126,15 @@ func (s Spec) Validate() error {
 		if m.Path == "" {
 			return fmt.Errorf("mount entry has empty path")
 		}
+		if !strings.HasPrefix(m.Path, "/") && !strings.HasPrefix(m.Path, "~/") {
+			return fmt.Errorf("mount path %q must be absolute or start with ~/", m.Path)
+		}
+		if hasDotDot(m.Path) {
+			return fmt.Errorf("mount path %q must not contain ..", m.Path)
+		}
 		if m.Name != "" {
-			if m.Name == "." || m.Name == ".." || !mountNameRe.MatchString(m.Name) {
-				return fmt.Errorf("invalid mount name %q (use a single path segment)", m.Name)
+			if err := ValidateMountName(m.Name); err != nil {
+				return err
 			}
 		}
 	}
@@ -170,7 +171,17 @@ func (s Spec) Validate() error {
 	return nil
 }
 
-// Resolve applies precedence flags > spec > defaults and materializes the workspace.
+// ValidateMountName checks a guest directory name: a single path segment. It is
+// exported because a mount can also be named at runtime, outside a Spec, and it
+// doubles as the check on a Spec's own `name` — hence the context-free message.
+func ValidateMountName(name string) error {
+	if name == "." || name == ".." || !mountNameRe.MatchString(name) {
+		return fmt.Errorf("invalid name %q (use a single path segment)", name)
+	}
+	return nil
+}
+
+// Resolve applies precedence flags > spec > defaults and materializes the mounts.
 func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	r := Resolved{
 		Name: env.ProjectName,
@@ -202,8 +213,9 @@ func Resolve(flags Flags, spec Spec, env Env) (Resolved, error) {
 	r.Resources.Disk = firstStr(flags.Disk, spec.Resources.Disk, DefaultDisk)
 	r.Base.Image = firstStr(flags.BaseImage, spec.Base.Image, DefaultImage)
 
-	r.Workspace = Mount{HostPath: env.HostPath, GuestPath: path.Join(env.GuestHome, env.ProjectName)}
-	mounts, err := resolveMounts(env.Mounts, env.GuestHome, r.Workspace.GuestPath)
+	r.ConfigDir = env.ConfigDir
+	r.Home = env.GuestHome
+	mounts, err := resolveMounts(env.Mounts, env.GuestHome)
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -232,13 +244,12 @@ func firstStr(vals ...string) string {
 	return ""
 }
 
-// resolveMounts computes each additional mount's guest path (~/<name>), dedupes
-// identical host paths, and rejects guest-path collisions — including a clash
-// with the primary workspace.
-func resolveMounts(inputs []MountInput, guestHome, primaryGuest string) ([]Mount, error) {
+// resolveMounts computes each mount's guest path (~/<name>), dedupes identical
+// host paths, and rejects guest-path collisions between two different folders.
+func resolveMounts(inputs []MountInput, guestHome string) ([]Mount, error) {
 	var out []Mount
 	seenHost := map[string]bool{}
-	owner := map[string]string{primaryGuest: "the primary workspace"}
+	owner := map[string]string{}
 	for _, in := range inputs {
 		if seenHost[in.HostPath] {
 			continue
@@ -250,9 +261,9 @@ func resolveMounts(inputs []MountInput, guestHome, primaryGuest string) ([]Mount
 		}
 		guest := path.Join(guestHome, name)
 		if prev, clash := owner[guest]; clash {
-			return nil, fmt.Errorf("mount conflict: %q and %s both map to %s; set an explicit name on one of them", in.HostPath, prev, guest)
+			return nil, fmt.Errorf("mount conflict: %q and %q both map to %s; pass a different name", in.HostPath, prev, guest)
 		}
-		owner[guest] = fmt.Sprintf("%q", in.HostPath)
+		owner[guest] = in.HostPath
 		out = append(out, Mount{HostPath: in.HostPath, GuestPath: guest})
 	}
 	return out, nil
@@ -282,7 +293,7 @@ func resolveFiles(inputs []FileInput, guestHome string) []FileCopy {
 		if mode == "" && !in.IsDir {
 			mode = DefaultFileMode
 		}
-		out = append(out, FileCopy{Root: in.Root, Rel: in.Rel, To: to, Mode: mode, IsDir: in.IsDir})
+		out = append(out, FileCopy{Rel: in.Rel, To: to, Mode: mode, IsDir: in.IsDir})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].To < out[j].To })
 	return out

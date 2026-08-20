@@ -1,6 +1,6 @@
-// Package config defines the Project Spec, its validation, and the resolution
-// funnel (flags > in-repo spec > built-in defaults) that produces a Resolved
-// config feeding both the Lima template and the VM Record.
+// Package config defines the VM Spec, its validation, and the resolution funnel
+// (flags > VM Spec > built-in defaults) that produces a Resolved config feeding
+// both the Lima template and the VM Record.
 package config
 
 import (
@@ -23,9 +23,10 @@ type Base struct {
 	Image string `yaml:"image,omitempty"`
 }
 
-// MountSpec is one additional host folder in the Project Spec. It accepts either
-// a bare string (the path) or a mapping {path, name}. Paths are relative to the
-// spec file (or absolute); name overrides the guest directory name.
+// MountSpec is one project folder in the VM Spec. It accepts either a bare
+// string (the path) or a mapping {path, name}. Paths are absolute or ~/-prefixed
+// on the host; name overrides the guest directory name, which defaults to the
+// path's basename.
 type MountSpec struct {
 	Path string `yaml:"path"`
 	Name string `yaml:"name,omitempty"`
@@ -45,7 +46,7 @@ func (m *MountSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// ModuleSpec is one tool in the Project Spec: a mise tool reference plus an
+// ModuleSpec is one tool in the VM Spec: a mise tool reference plus an
 // optional version. It accepts either a bare scalar (the name) or a single-key
 // mapping (name → version) — the same scalar-or-map shape MountSpec uses.
 type ModuleSpec struct {
@@ -113,10 +114,12 @@ func (f *FileSpec) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-// Spec is the human-authored Project Spec (.agent-vm.yaml). Modules is a pointer
-// so an absent key (nil → defaults may apply) is distinguishable from an explicit
-// empty list (base only).
+// Spec is the human-authored VM Spec (agent-vm.yaml): one domain of work — its
+// tools, its resources, and the projects mounted into it. Modules is a pointer
+// so an absent key (nil → defaults may apply) is distinguishable from an
+// explicit empty list (base only).
 type Spec struct {
+	Name      string              `yaml:"name,omitempty"`
 	Modules   *[]ModuleSpec       `yaml:"modules,omitempty"`
 	Resources Resources           `yaml:"resources,omitempty"`
 	Base      Base                `yaml:"base,omitempty"`
@@ -125,7 +128,7 @@ type Spec struct {
 	Scripts   []string            `yaml:"scripts,omitempty"`
 }
 
-// Load parses a .agent-vm.yaml file into a Spec.
+// Load parses an agent-vm.yaml file into a Spec.
 func Load(path string) (Spec, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

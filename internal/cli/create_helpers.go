@@ -19,15 +19,20 @@ func osUsername() string {
 	return "user"
 }
 
-// projectName derives the VM name from the project directory's basename.
-func projectName(dir string) (string, error) {
-	return vmname.Normalize(filepath.Base(dir))
+// vmName derives the VM name: the spec's `name` if set, otherwise the basename
+// of the VM directory. Either way the result goes through vmname.Normalize.
+func vmName(spec config.Spec, dir string) (string, error) {
+	raw := spec.Name
+	if raw == "" {
+		raw = filepath.Base(dir)
+	}
+	return vmname.Normalize(raw)
 }
 
-// loadSpecForCreate loads the project's `.agent-vm.yaml`, which is required, and
-// returns it together with the host path of the project directory.
+// loadSpecForCreate loads the VM directory's `agent-vm.yaml`, which is required,
+// and returns it together with the host path of that directory.
 func loadSpecForCreate(dir string) (config.Spec, string, error) {
-	specPath := filepath.Join(dir, ".agent-vm.yaml")
+	specPath := filepath.Join(dir, "agent-vm.yaml")
 	if _, err := os.Stat(specPath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return config.Spec{}, "", errSpecRequired(dir)
@@ -42,63 +47,63 @@ func loadSpecForCreate(dir string) (config.Spec, string, error) {
 }
 
 func errSpecRequired(dir string) error {
-	return fmt.Errorf(".agent-vm.yaml not found in %s (run: avm init)", dir)
+	return fmt.Errorf("agent-vm.yaml not found in %s (run: avm init)", dir)
 }
 
-// resolveMountInputs turns Spec mounts (paths relative to specDir) and --mount
-// flags (relative to cwd) into absolute, existence-checked MountInputs. This is
-// where the filesystem is touched, keeping the config package pure.
-func resolveMountInputs(specMounts []config.MountSpec, flagMounts []string, specDir, cwd string) ([]config.MountInput, error) {
-	var out []config.MountInput
-	add := func(rawPath, base, name string) error {
-		abs := rawPath
-		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(base, abs)
-		}
-		abs = filepath.Clean(abs)
-		fi, err := os.Stat(abs)
-		if err != nil {
-			return fmt.Errorf("mount source not found: %s", abs)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("mount source is not a directory: %s", abs)
-		}
-		out = append(out, config.MountInput{HostPath: abs, Name: name})
+// checkNotVMDir rejects a mount source that is the VM's own directory, or a
+// parent folder containing it. That directory is already mounted read-only at
+// /mnt/host/vm; mounting it again read/write would hand the guest write access
+// to agent-vm.yaml, the CA bundle, and every credential declared in `files` —
+// Lima applies both mounts rather than deduplicating them.
+func checkNotVMDir(abs, configDir string) error {
+	if configDir == "" {
 		return nil
 	}
-	for _, m := range specMounts {
-		if err := add(m.Path, specDir, m.Name); err != nil {
-			return nil, err
-		}
+	rel, err := filepath.Rel(filepath.Clean(abs), filepath.Clean(configDir))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
 	}
-	for _, p := range flagMounts {
-		if err := add(p, cwd, ""); err != nil {
+	return fmt.Errorf("%s is this VM's own directory (or contains it); it is already mounted read-only at /mnt/host/vm", abs)
+}
+
+// resolveMountInputs turns Spec mounts into absolute, existence-checked
+// MountInputs. This is where the filesystem is touched, keeping the config
+// package pure. Relative paths were already rejected by validation.
+func resolveMountInputs(specMounts []config.MountSpec, configDir string) ([]config.MountInput, error) {
+	var out []config.MountInput
+	for _, m := range specMounts {
+		abs, err := expandTilde(m.Path)
+		if err != nil {
 			return nil, err
 		}
+		abs = filepath.Clean(abs)
+		if err := checkNotVMDir(abs, configDir); err != nil {
+			return nil, err
+		}
+		fi, err := os.Stat(abs)
+		if err != nil {
+			return nil, fmt.Errorf("mount source not found: %s", abs)
+		}
+		if !fi.IsDir() {
+			return nil, fmt.Errorf("mount source is not a directory: %s", abs)
+		}
+		out = append(out, config.MountInput{HostPath: abs, Name: m.Name})
 	}
 	return out, nil
 }
 
-// resolveFileInputs turns Spec `files` entries into resolved inputs. Sources are
-// relative to the spec dir, or absolute/~-prefixed on the host; this is where the
-// filesystem is touched, keeping the config package pure.
-//
-// A source must sit under one of the two directories the guest can see — the
-// project dir (VM_WORKSPACE) or the host store (VM_SECRETS) — because the copy
-// runs inside the guest.
-func resolveFileInputs(specFiles map[string]config.FileSpec, specDir, storeRoot string) ([]config.FileInput, error) {
+// resolveFileInputs turns Spec `files` entries into resolved inputs. A source
+// must sit under the VM directory, because the copy runs inside the guest and
+// that directory is the only host folder a `files` source can be read from.
+func resolveFileInputs(specFiles map[string]config.FileSpec, configDir string) ([]config.FileInput, error) {
 	var out []config.FileInput
 	for src, f := range specFiles {
-		abs := src
-		if strings.HasPrefix(abs, "~/") {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return nil, err
-			}
-			abs = filepath.Join(home, abs[2:])
+		abs, err := expandTilde(src)
+		if err != nil {
+			return nil, err
 		}
 		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(specDir, abs)
+			abs = filepath.Join(configDir, abs)
 		}
 		abs = filepath.Clean(abs)
 
@@ -106,19 +111,31 @@ func resolveFileInputs(specFiles map[string]config.FileSpec, specDir, storeRoot 
 		if err != nil {
 			return nil, fmt.Errorf("files source %q: %w", src, err)
 		}
-
-		root, rel, err := classifyFileRoot(abs, specDir, storeRoot)
-		if err != nil {
-			return nil, err
+		rel, err := filepath.Rel(filepath.Clean(configDir), abs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("files source %q is outside the VM directory (%s); the guest cannot see it", abs, configDir)
 		}
 		if fi.IsDir() && f.Mode != "" {
 			return nil, fmt.Errorf("files source %q is a directory; remove `mode` (directories keep their own permissions)", src)
 		}
 		out = append(out, config.FileInput{
-			Root: root, Rel: rel, To: f.To, Mode: f.Mode, IsDir: fi.IsDir(),
+			Rel: filepath.ToSlash(rel), To: f.To, Mode: f.Mode, IsDir: fi.IsDir(),
 		})
 	}
 	return out, nil
+}
+
+// expandTilde replaces a leading ~/ with the host home. Paths are otherwise
+// returned unchanged; callers Clean and check them.
+func expandTilde(p string) (string, error) {
+	if !strings.HasPrefix(p, "~/") {
+		return p, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, p[2:]), nil
 }
 
 // resolveScriptInputs turns Spec `scripts` entries (relative to the spec dir)
@@ -138,22 +155,4 @@ func resolveScriptInputs(specScripts []string, specDir string) ([]string, error)
 		out = append(out, abs)
 	}
 	return out, nil
-}
-
-// classifyFileRoot decides which mounted root a source belongs to and its path
-// relative to that root.
-func classifyFileRoot(abs, specDir, storeRoot string) (config.FileRoot, string, error) {
-	for _, c := range []struct {
-		root config.FileRoot
-		base string
-	}{
-		{config.RootWorkspace, filepath.Clean(specDir)},
-		{config.RootSecrets, filepath.Clean(storeRoot)},
-	} {
-		rel, err := filepath.Rel(c.base, abs)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return c.root, filepath.ToSlash(rel), nil
-		}
-	}
-	return "", "", fmt.Errorf("files source %q is outside both the project directory (%s) and the host store (%s); the guest cannot see it", abs, specDir, storeRoot)
 }

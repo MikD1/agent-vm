@@ -16,7 +16,7 @@ func TestRecreateFromRecord(t *testing.T) {
 		Modules:   []config.ModuleSpec{{Name: "node"}},
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
-		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
+		ConfigDir: "/Users/me/vms/work", Home: "/home/me",
 	}
 	_ = store.Write(rec)
 	r := &okRunner{}
@@ -54,7 +54,7 @@ func TestRecordToResolvedBackfillsEmptyVersion(t *testing.T) {
 	rec := registry.Record{
 		Name: "my-api", User: "me",
 		Modules:   []config.ModuleSpec{{Name: "node", Version: ""}, {Name: "go", Version: "1.24"}},
-		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
+		ConfigDir: "/Users/me/vms/work", Home: "/home/me",
 	}
 	r := recordToResolved(rec)
 	if len(r.Modules) != 2 {
@@ -72,11 +72,36 @@ func TestRecordToResolvedBackfillsEmptyVersion(t *testing.T) {
 	}
 }
 
+// TestRecreateDoesNotCallLimaInfo proves recreate takes the guest home from the
+// Record — the one the VM was built with — instead of asking limactl, whose
+// answer describes the template and can shift with the Lima version.
+func TestRecreateDoesNotCallLimaInfo(t *testing.T) {
+	store := registry.NewStore(t.TempDir())
+	_ = store.Write(registry.Record{
+		Name: "work", User: "me",
+		Modules:   []config.ModuleSpec{{Name: "node"}},
+		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
+		Base:      config.Base{Image: "template:_images/ubuntu"},
+		ConfigDir: "/Users/me/vms/work",
+		Home:      "/home/me.linux",
+	})
+	r := &okRunner{}
+	deps := createDeps{lima: lima.New(r), store: store}
+	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, op := range r.ops {
+		if op == "info" {
+			t.Errorf("recreate must not call `limactl info`; ops = %v", r.ops)
+		}
+	}
+}
+
 func TestRecordToResolvedCarriesMounts(t *testing.T) {
 	rec := registry.Record{
 		Name: "my-api", User: "me",
-		Workspace: config.Mount{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"},
-		Mounts:    []config.Mount{{HostPath: "/h/shared", GuestPath: "/home/me/shared"}},
+		ConfigDir: "/Users/me/vms/work", Home: "/home/me",
+		Mounts: []config.Mount{{HostPath: "/h/shared", GuestPath: "/home/me/shared"}},
 	}
 	r := recordToResolved(rec)
 	if len(r.Mounts) != 1 || r.Mounts[0].GuestPath != "/home/me/shared" {

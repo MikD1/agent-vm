@@ -11,6 +11,11 @@ import (
 	"github.com/MikD1/agent-vm/internal/lima"
 )
 
+// GuestConfigMount is where the VM directory is mounted inside the guest,
+// read-only. It is defined once here and reused by the Lima config renderer, so
+// the mount point cannot drift between the rendered config and the env contract.
+const GuestConfigMount = "/mnt/host/vm"
+
 // Provisioner runs the phases for one VM.
 type Provisioner struct {
 	lima      *lima.Client
@@ -29,10 +34,9 @@ func (p *Provisioner) InstalledTools() []config.ModuleSpec { return p.installed 
 
 func (p *Provisioner) env(r config.Resolved) map[string]string {
 	return map[string]string{
-		"VM_USER":      r.User,
-		"VM_PROJECT":   r.Name,
-		"VM_WORKSPACE": r.Workspace.GuestPath,
-		"VM_SECRETS":   "/mnt/host/agent-vm",
+		"VM_USER":   r.User,
+		"VM_HOME":   r.Home,
+		"VM_CONFIG": GuestConfigMount,
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 
 func writeTemp(t *testing.T, content string) string {
 	t.Helper()
-	p := filepath.Join(t.TempDir(), ".agent-vm.yaml")
+	p := filepath.Join(t.TempDir(), "agent-vm.yaml")
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +57,25 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
+func TestLoadName(t *testing.T) {
+	s, err := Load(writeTemp(t, "name: work\nmodules: [node]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Name != "work" {
+		t.Errorf("name = %q, want work", s.Name)
+	}
+	absent, err := Load(writeTemp(t, "modules: [node]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if absent.Name != "" {
+		t.Errorf("absent name = %q, want empty", absent.Name)
+	}
+}
+
 func TestLoadMounts(t *testing.T) {
-	p := writeTemp(t, "modules: [node]\nmounts:\n  - ../shared-lib\n  - path: ../tools/cli\n    name: cli-tools\n")
+	p := writeTemp(t, "modules: [node]\nmounts:\n  - ~/projects/api\n  - path: /Users/me/tools/cli\n    name: cli-tools\n")
 	s, err := Load(p)
 	if err != nil {
 		t.Fatal(err)
@@ -66,10 +83,10 @@ func TestLoadMounts(t *testing.T) {
 	if len(s.Mounts) != 2 {
 		t.Fatalf("want 2 mounts, got %d (%+v)", len(s.Mounts), s.Mounts)
 	}
-	if s.Mounts[0].Path != "../shared-lib" || s.Mounts[0].Name != "" {
+	if s.Mounts[0].Path != "~/projects/api" || s.Mounts[0].Name != "" {
 		t.Errorf("string form parsed wrong: %+v", s.Mounts[0])
 	}
-	if s.Mounts[1].Path != "../tools/cli" || s.Mounts[1].Name != "cli-tools" {
+	if s.Mounts[1].Path != "/Users/me/tools/cli" || s.Mounts[1].Name != "cli-tools" {
 		t.Errorf("object form parsed wrong: %+v", s.Mounts[1])
 	}
 }

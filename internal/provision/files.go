@@ -9,10 +9,10 @@ import (
 	"github.com/MikD1/agent-vm/internal/config"
 )
 
-// renderFileCopies is the phase 4 script: copy each declared file out of a mount
-// and into its destination, owned by the VM user. Sources are addressed through
-// the env contract (VM_WORKSPACE, VM_SECRETS) rather than through host paths, so
-// the same entries work on any machine that has the project checked out.
+// renderFileCopies is the phase 4 script: copy each declared file out of the VM
+// directory and into its destination, owned by the VM user. Sources are
+// addressed through the env contract (VM_CONFIG) rather than through host paths,
+// so the same entries work on any machine that has the VM directory.
 //
 // Returns an empty slice when there is nothing to copy, so the caller can skip
 // the phase entirely.
@@ -22,22 +22,17 @@ func renderFileCopies(files []config.FileCopy) []byte {
 	}
 	var b bytes.Buffer
 	for _, f := range files {
-		root := "${VM_WORKSPACE}"
-		if f.Root == config.RootSecrets {
-			root = "${VM_SECRETS}"
-		}
-		// root must stay double-quoted so ${VM_WORKSPACE}/${VM_SECRETS} expand; f.Rel
-		// is a relative path out of the project workspace or the host secrets store
-		// and is not restricted to shell-safe characters, so it is single-quoted
-		// (shellQuote) separately. Go's %q on the combined string would not escape
-		// $/backticks in f.Rel, letting a name like "$(...)"" execute as a command —
-		// adjacent double- and single-quoted bash strings concatenate into one word,
-		// so this still resolves to "${EXPANDED_ROOT}/relative/path" with no double
-		// slash.
-		src := fmt.Sprintf("%q", root) + "/" + shellQuote(f.Rel)
+		// The root must stay double-quoted so ${VM_CONFIG} expands; f.Rel is a
+		// relative path out of the VM directory and is not restricted to
+		// shell-safe characters, so it is single-quoted (shellQuote) separately.
+		// Go's %q on the combined string would not escape $/backticks in f.Rel,
+		// letting a name like "$(...)" execute as a command — adjacent double- and
+		// single-quoted bash strings concatenate into one word, so this still
+		// resolves to "${VM_CONFIG}/relative/path" with no double slash.
+		src := `"${VM_CONFIG}"/` + shellQuote(f.Rel)
 		// dst comes from the guest destination in the Spec, which is not restricted
 		// to shell-safe characters. Single-quote it (shellQuote), unlike src, which
-		// must stay double-quoted so ${VM_WORKSPACE}/${VM_SECRETS} expand.
+		// must stay double-quoted so ${VM_CONFIG} expands.
 		dst := shellQuote(f.To)
 		dir := shellQuote(path.Dir(f.To))
 		// Only chown/chmod a directory this script actually creates. A pre-existing

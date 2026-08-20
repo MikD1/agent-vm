@@ -8,3 +8,4 @@ local/
 docs/superpowers/
 /bin/
 *.test
+.superpowers/

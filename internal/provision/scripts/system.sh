@@ -4,11 +4,11 @@ set -euo pipefail
 # Installs host CA certificates into the system trust store and exports trust
 # env globally, so every later platform step (base, docker, mise) and every
 # mise-installed tool inherits trust with no per-tool code.
-# Contract: VM_USER, VM_PROJECT, VM_WORKSPACE, VM_SECRETS (see architecture §5).
+# Contract: VM_USER, VM_HOME, VM_CONFIG (see architecture §5).
 
 export DEBIAN_FRONTEND=noninteractive
 
-CA_DIR="${VM_SECRETS}/ca-certificates"
+CA_DIR="${VM_CONFIG}/ca-certificates"
 CA_BUNDLE=/etc/ssl/certs/agent-vm-ca-bundle.pem
 
 if [ -d "$CA_DIR" ]; then

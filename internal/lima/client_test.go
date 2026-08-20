@@ -74,7 +74,7 @@ func TestCreateArgs(t *testing.T) {
 func TestProvisionStdin(t *testing.T) {
 	f := &fakeRunner{}
 	c := New(f)
-	env := map[string]string{"VM_USER": "me", "VM_PROJECT": "my-api", "VM_WORKSPACE": "/home/me/my-api", "VM_SECRETS": "/mnt/host/agent-vm"}
+	env := map[string]string{"VM_USER": "me", "VM_HOME": "/home/me", "VM_CONFIG": "/mnt/host/vm"}
 	if err := c.Provision(context.Background(), "my-api", []byte("echo hi"), env); err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +85,45 @@ func TestProvisionStdin(t *testing.T) {
 	joined := strings.Join(got.args, " ")
 	if !strings.Contains(joined, "--workdir /") || !strings.Contains(joined, "sudo") {
 		t.Errorf("provision args missing workdir/sudo: %v", got.args)
+	}
+}
+
+// TestProvisionPassesThreePositionalArgs pins the env contract at the layer
+// that actually transports it: the wrapper exports exactly VM_USER, VM_HOME and
+// VM_CONFIG, and they arrive as the three trailing positional arguments after
+// the `--` separator. A fourth would silently shift $1..$3 in every script.
+func TestProvisionPassesThreePositionalArgs(t *testing.T) {
+	f := &fakeRunner{}
+	c := New(f)
+	env := map[string]string{"VM_USER": "me", "VM_HOME": "/home/me", "VM_CONFIG": "/mnt/host/vm"}
+	if err := c.Provision(context.Background(), "my-api", []byte("echo hi"), env); err != nil {
+		t.Fatal(err)
+	}
+	args := f.calls[0].args
+	if got := args[len(args)-3:]; !equal(got, []string{"me", "/home/me", "/mnt/host/vm"}) {
+		t.Errorf("positional env args = %v, want [me /home/me /mnt/host/vm]", got)
+	}
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, `VM_USER="$1" VM_HOME="$2" VM_CONFIG="$3"`) {
+		t.Errorf("wrapper does not export the three-variable contract: %v", args)
+	}
+	for _, gone := range []string{"VM_PROJECT", "VM_WORKSPACE", "VM_SECRETS"} {
+		if strings.Contains(joined, gone) {
+			t.Errorf("wrapper still mentions %s: %v", gone, args)
+		}
+	}
+}
+
+func TestEditMountsArgs(t *testing.T) {
+	f := &fakeRunner{}
+	c := New(f)
+	expr := `.mounts = [{"location":"/h/api","mountPoint":"/home/me/api","writable":true}]`
+	if err := c.EditMounts(context.Background(), "my-api", expr); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"edit", "my-api", "--set", expr}
+	if got := f.calls[0].args; !equal(got, want) {
+		t.Errorf("EditMounts args = %v, want %v", got, want)
 	}
 }
 

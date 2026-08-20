@@ -76,10 +76,9 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 
 func newCreateCmd() *cobra.Command {
 	var f config.Flags
-	var mountFlags []string
 	cmd := &cobra.Command{
 		Use:   "create [path]",
-		Short: "Create and start a VM from a project directory",
+		Short: "Create and start a VM from a VM directory",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -97,12 +96,20 @@ func newCreateCmd() *cobra.Command {
 				}
 			}
 
-			limaClient := newLimaClient(cmd)
-
-			projName, err := projectName(absDir)
+			// The spec is read first: the VM name can come from its `name` key.
+			spec, configDir, err := loadSpecForCreate(absDir)
 			if err != nil {
 				return err
 			}
+			if err := spec.Validate(); err != nil {
+				return err
+			}
+			name, err := vmName(spec, absDir)
+			if err != nil {
+				return err
+			}
+
+			limaClient := newLimaClient(cmd)
 			user := deriveGuestUser(osUsername())
 			infoJSON, err := limaClient.InfoRaw(ctx)
 			if err != nil {
@@ -118,34 +125,24 @@ func newCreateCmd() *cobra.Command {
 				return err
 			}
 
-			spec, hostPath, err := loadSpecForCreate(absDir)
+			mountInputs, err := resolveMountInputs(spec.Mounts, configDir)
 			if err != nil {
 				return err
 			}
-			if err := spec.Validate(); err != nil {
-				return err
-			}
-
-			mountInputs, err := resolveMountInputs(spec.Mounts, mountFlags, absDir, cwd)
+			fileInputs, err := resolveFileInputs(spec.Files, configDir)
 			if err != nil {
 				return err
 			}
-
-			fileInputs, err := resolveFileInputs(spec.Files, absDir, root)
-			if err != nil {
-				return err
-			}
-
-			scriptInputs, err := resolveScriptInputs(spec.Scripts, absDir)
+			scriptInputs, err := resolveScriptInputs(spec.Scripts, configDir)
 			if err != nil {
 				return err
 			}
 
 			env := config.Env{
-				ProjectName: projName,
+				ProjectName: name,
 				GuestUser:   user,
 				GuestHome:   home,
-				HostPath:    hostPath,
+				ConfigDir:   configDir,
 				Mounts:      mountInputs,
 				Files:       fileInputs,
 				Scripts:     scriptInputs,
@@ -171,6 +168,5 @@ func newCreateCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.Memory, "memory", "", "override memory (e.g. 16GiB)")
 	cmd.Flags().StringVar(&f.Disk, "disk", "", "override disk (e.g. 200GiB)")
 	cmd.Flags().StringVar(&f.BaseImage, "base-image", "", "override base image")
-	cmd.Flags().StringArrayVar(&mountFlags, "mount", nil, "additional host folder to mount (repeatable)")
 	return cmd
 }

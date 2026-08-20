@@ -102,33 +102,42 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 	return err
 }
 
-// Provision streams a script to the guest as root with the env contract exported.
-// Env is passed via positional args to avoid quoting issues.
-func (c *Client) Provision(ctx context.Context, name string, script []byte, env map[string]string) error {
-	wrapper := `export VM_USER="$1" VM_PROJECT="$2" VM_WORKSPACE="$3" VM_SECRETS="$4"
+// provisionWrapper re-exports the guest env contract from positional args, so no
+// value ever passes through shell quoting. Both provisioning entry points share
+// it: the contract must not drift between them.
+const provisionWrapper = `export VM_USER="$1" VM_HOME="$2" VM_CONFIG="$3"
 export DEBIAN_FRONTEND=noninteractive
 exec bash -euo pipefail -s`
-	args := []string{
+
+// provisionArgs builds the limactl argv for one provisioning call. The three
+// contract values are passed positionally, in the order provisionWrapper reads
+// them.
+func provisionArgs(name string, env map[string]string) []string {
+	return []string{
 		"shell", "--workdir", "/", name,
-		"sudo", "bash", "-c", wrapper, "--",
-		env["VM_USER"], env["VM_PROJECT"], env["VM_WORKSPACE"], env["VM_SECRETS"],
+		"sudo", "bash", "-c", provisionWrapper, "--",
+		env["VM_USER"], env["VM_HOME"], env["VM_CONFIG"],
 	}
-	_, err := c.run(ctx, script, args...)
+}
+
+// Provision streams a script to the guest as root with the env contract exported.
+func (c *Client) Provision(ctx context.Context, name string, script []byte, env map[string]string) error {
+	_, err := c.run(ctx, script, provisionArgs(name, env)...)
 	return err
 }
 
 // ProvisionOutput is Provision plus the guest's stdout, for scripts whose output
 // avm needs to parse.
 func (c *Client) ProvisionOutput(ctx context.Context, name string, script []byte, env map[string]string) ([]byte, error) {
-	wrapper := `export VM_USER="$1" VM_PROJECT="$2" VM_WORKSPACE="$3" VM_SECRETS="$4"
-export DEBIAN_FRONTEND=noninteractive
-exec bash -euo pipefail -s`
-	args := []string{
-		"shell", "--workdir", "/", name,
-		"sudo", "bash", "-c", wrapper, "--",
-		env["VM_USER"], env["VM_PROJECT"], env["VM_WORKSPACE"], env["VM_SECRETS"],
-	}
-	return c.run(ctx, script, args...)
+	return c.run(ctx, script, provisionArgs(name, env)...)
+}
+
+// EditMounts rewrites the instance's mount list via a yq expression. Lima
+// attaches virtiofs devices at boot, so the caller stops and starts the VM
+// around this call for the change to take effect.
+func (c *Client) EditMounts(ctx context.Context, name, yqExpr string) error {
+	_, err := c.run(ctx, nil, "edit", name, "--set", yqExpr)
+	return err
 }
 
 // Shell runs an interactive shell in the VM at workdir (empty workdir = default).

@@ -30,12 +30,15 @@ func recordToResolved(rec registry.Record) config.Resolved {
 	return config.Resolved{
 		Name: rec.Name, User: rec.User,
 		Modules: modules, Resources: rec.Resources, Base: rec.Base,
-		Workspace: rec.Workspace, Mounts: rec.Mounts, Files: rec.Files, Scripts: rec.Scripts,
+		ConfigDir: rec.ConfigDir, Home: rec.Home,
+		Mounts: rec.Mounts, Files: rec.Files, Scripts: rec.Scripts,
 	}
 }
 
 // runRecreate reads the Record, deletes any existing VM, and rebuilds pristinely.
-// The Record is NOT rewritten (it is the source of truth for recreation).
+// The Record is NOT rewritten (it is the source of truth for recreation), and the
+// guest home comes from it rather than from `limactl info`: the Record holds the
+// home this VM was actually built with.
 func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool) error {
 	rec, err := deps.store.Read(name)
 	if err != nil {
@@ -46,16 +49,7 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 	}
 	r := recordToResolved(rec)
 
-	infoJSON, err := deps.lima.InfoRaw(ctx)
-	if err != nil {
-		return fmt.Errorf("limactl info: %w", err)
-	}
-	guestHomeVal, err := guestHome(infoJSON, rec.User)
-	if err != nil {
-		return err
-	}
-
-	limaYAML, err := buildLimaConfig(r, guestHomeVal)
+	limaYAML, err := buildLimaConfig(r, rec.Home)
 	if err != nil {
 		return err
 	}

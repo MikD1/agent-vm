@@ -9,9 +9,6 @@ import (
 )
 
 func TestEmbeddedTemplatesPresent(t *testing.T) {
-	if !strings.Contains(string(BaseLima), "/mnt/host/agent-vm") {
-		t.Error("base.yaml must mount the renamed host store")
-	}
 	if strings.Contains(string(BaseLima), "ai-dev-vm") {
 		t.Error("base.yaml still references the old name")
 	}
@@ -20,9 +17,31 @@ func TestEmbeddedTemplatesPresent(t *testing.T) {
 	}
 }
 
-func TestSpecTemplateDocumentsMounts(t *testing.T) {
-	if !strings.Contains(string(SpecTemplate), "mounts:") {
-		t.Error("spec template should show a mounts example")
+// TestBaseTemplateHasNoMounts: every mount is per-VM (the service mount points
+// at that VM's own directory), so the static template must declare none.
+func TestBaseTemplateHasNoMounts(t *testing.T) {
+	var doc map[string]any
+	if err := yaml.Unmarshal(BaseLima, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["mounts"]; ok {
+		t.Errorf("base.yaml must not declare a mounts key:\n%s", BaseLima)
+	}
+}
+
+// TestSpecTemplateMountsSectionIsLive proves `avm init` writes a mounts key that
+// specedit.AddMount can append into, while still parsing as "no mounts yet" so
+// `avm create` works before any project is attached.
+func TestSpecTemplateMountsSectionIsLive(t *testing.T) {
+	if !strings.Contains(string(SpecTemplate), "\nmounts:") {
+		t.Error("spec template must carry a live mounts key")
+	}
+	var s config.Spec
+	if err := yaml.Unmarshal(SpecTemplate, &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Mounts) != 0 {
+		t.Errorf("template must declare no actual mounts, got %+v", s.Mounts)
 	}
 }
 

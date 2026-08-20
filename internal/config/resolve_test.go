@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func mods(v ...ModuleSpec) *[]ModuleSpec { return &v }
 
@@ -44,20 +47,6 @@ func TestResolveDefaultModulesOnlyWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestResolveWorkspace(t *testing.T) {
-	env := Env{ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api"}
-	r, err := Resolve(Flags{}, Spec{}, env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r.Workspace.HostPath != "/Users/me/my-api" {
-		t.Errorf("hostPath = %q", r.Workspace.HostPath)
-	}
-	if r.Workspace.GuestPath != "/home/me.linux/my-api" {
-		t.Errorf("guestPath = %q", r.Workspace.GuestPath)
-	}
-}
-
 func TestValidate(t *testing.T) {
 	if err := (Spec{Resources: Resources{CPUs: 0, Memory: "16xb"}}).Validate(); err == nil {
 		t.Error("want error for bad memory")
@@ -71,21 +60,56 @@ func TestValidateMounts(t *testing.T) {
 	if err := (Spec{Mounts: []MountSpec{{Path: ""}}}).Validate(); err == nil {
 		t.Error("want error for empty mount path")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: "bad/name"}}}).Validate(); err == nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "/x", Name: "bad/name"}}}).Validate(); err == nil {
 		t.Error("want error for name with a slash")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x", Name: ".."}}}).Validate(); err == nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "/x", Name: ".."}}}).Validate(); err == nil {
 		t.Error("want error for name '..'")
 	}
-	if err := (Spec{Mounts: []MountSpec{{Path: "../x"}, {Path: "../y", Name: "ok-1"}}}).Validate(); err != nil {
+	if err := (Spec{Mounts: []MountSpec{{Path: "/x"}, {Path: "~/y", Name: "ok-1"}}}).Validate(); err != nil {
 		t.Errorf("unexpected error for valid mounts: %v", err)
+	}
+}
+
+// TestValidateMountPathsMustBeAbsolute pins decision 3: a relative path would
+// make the VM's contents depend on where the config folder happens to sit.
+func TestValidateMountPathsMustBeAbsolute(t *testing.T) {
+	for _, bad := range []string{"../shared-lib", "lib", "./lib", "~x/y"} {
+		if err := (Spec{Mounts: []MountSpec{{Path: bad}}}).Validate(); err == nil {
+			t.Errorf("Validate(mount %q) = nil, want an error", bad)
+		}
+	}
+	for _, ok := range []string{"/Users/me/projects/api", "~/projects/api"} {
+		if err := (Spec{Mounts: []MountSpec{{Path: ok}}}).Validate(); err != nil {
+			t.Errorf("Validate(mount %q) = %v, want nil", ok, err)
+		}
+	}
+	// .. is rejected even inside an otherwise absolute path.
+	if err := (Spec{Mounts: []MountSpec{{Path: "/Users/me/../etc"}}}).Validate(); err == nil {
+		t.Error("want error for .. inside a mount path")
+	}
+}
+
+// TestValidateName covers the optional `name:` key. Full normalization lives in
+// the cli layer (vmname); config only rejects shapes that can never be a name.
+func TestValidateName(t *testing.T) {
+	if err := (Spec{Name: "work"}).Validate(); err != nil {
+		t.Errorf("Validate(name work) = %v, want nil", err)
+	}
+	if err := (Spec{}).Validate(); err != nil {
+		t.Errorf("an absent name must stay valid: %v", err)
+	}
+	for _, bad := range []string{"has/slash", ".", "..", "has space"} {
+		if err := (Spec{Name: bad}).Validate(); err == nil {
+			t.Errorf("Validate(name %q) = nil, want an error", bad)
+		}
 	}
 }
 
 func TestResolveMounts(t *testing.T) {
 	env := Env{
-		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux",
-		HostPath: "/Users/me/my-api",
+		ProjectName: "work", GuestUser: "me", GuestHome: "/home/me.linux",
+		ConfigDir: "/Users/me/vms/work",
 		Mounts: []MountInput{
 			{HostPath: "/Users/me/shared-lib"},               // → ~/shared-lib
 			{HostPath: "/Users/me/tools/cli", Name: "cli-x"}, // name override → ~/cli-x
@@ -107,23 +131,50 @@ func TestResolveMounts(t *testing.T) {
 	}
 }
 
-func TestResolveMountCollisionWithSibling(t *testing.T) {
+func TestResolveMountCollision(t *testing.T) {
 	env := Env{
-		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api",
+		ProjectName: "work", GuestUser: "me", GuestHome: "/home/me.linux",
 		Mounts: []MountInput{{HostPath: "/a/shared"}, {HostPath: "/b/shared"}}, // both → ~/shared
 	}
-	if _, err := Resolve(Flags{}, Spec{}, env); err == nil {
-		t.Error("want collision error for two mounts mapping to the same guest path")
+	_, err := Resolve(Flags{}, Spec{}, env)
+	if err == nil {
+		t.Fatal("want collision error for two mounts mapping to the same guest path")
+	}
+	if !strings.Contains(err.Error(), "pass a different name") {
+		t.Errorf("collision error = %q, want it to suggest a different name", err)
 	}
 }
 
-func TestResolveMountCollisionWithPrimary(t *testing.T) {
-	env := Env{
-		ProjectName: "my-api", GuestUser: "me", GuestHome: "/home/me.linux", HostPath: "/Users/me/my-api",
-		Mounts: []MountInput{{HostPath: "/elsewhere/my-api"}}, // basename my-api → clashes with primary
+// TestResolveNoMounts pins acceptance criterion 4: a VM with no mounts at all is
+// a valid, meaningful state — a domain you have not attached projects to yet.
+func TestResolveNoMounts(t *testing.T) {
+	r, err := Resolve(Flags{}, Spec{}, Env{
+		ProjectName: "work", GuestUser: "me", GuestHome: "/home/me.linux",
+		ConfigDir: "/Users/me/vms/work",
+	})
+	if err != nil {
+		t.Fatalf("a VM with no mounts must resolve: %v", err)
 	}
-	if _, err := Resolve(Flags{}, Spec{}, env); err == nil {
-		t.Error("want collision error against the primary workspace")
+	if len(r.Mounts) != 0 {
+		t.Errorf("Mounts = %+v, want empty", r.Mounts)
+	}
+}
+
+// TestResolveCarriesConfigDirAndHome: both are create-time facts the Record
+// stores, and `avm mount` later needs Home to build a new mount's guest path.
+func TestResolveCarriesConfigDirAndHome(t *testing.T) {
+	r, err := Resolve(Flags{}, Spec{}, Env{
+		ProjectName: "work", GuestUser: "me", GuestHome: "/home/me.linux",
+		ConfigDir: "/Users/me/vms/work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ConfigDir != "/Users/me/vms/work" {
+		t.Errorf("ConfigDir = %q", r.ConfigDir)
+	}
+	if r.Home != "/home/me.linux" {
+		t.Errorf("Home = %q", r.Home)
 	}
 }
 
@@ -191,8 +242,8 @@ func TestResolveFiles(t *testing.T) {
 	env := Env{
 		ProjectName: "p", GuestUser: "u", GuestHome: "/home/u.linux",
 		Files: []FileInput{
-			{Root: RootSecrets, Rel: "codex-auth.json", To: "~/.codex/auth.json", Mode: "0600"},
-			{Root: RootWorkspace, Rel: "claude-settings.json", To: "~/.claude/settings.json"},
+			{Rel: "codex-auth.json", To: "~/.codex/auth.json", Mode: "0600"},
+			{Rel: "claude-settings.json", To: "~/.claude/settings.json"},
 		},
 	}
 	r, err := Resolve(Flags{}, Spec{}, env)
@@ -201,8 +252,8 @@ func TestResolveFiles(t *testing.T) {
 	}
 	// Sorted by destination, and ~/ expanded against the guest home.
 	want := []FileCopy{
-		{Root: RootWorkspace, Rel: "claude-settings.json", To: "/home/u.linux/.claude/settings.json", Mode: DefaultFileMode},
-		{Root: RootSecrets, Rel: "codex-auth.json", To: "/home/u.linux/.codex/auth.json", Mode: "0600"},
+		{Rel: "claude-settings.json", To: "/home/u.linux/.claude/settings.json", Mode: DefaultFileMode},
+		{Rel: "codex-auth.json", To: "/home/u.linux/.codex/auth.json", Mode: "0600"},
 	}
 	if len(r.Files) != 2 || r.Files[0] != want[0] || r.Files[1] != want[1] {
 		t.Errorf("Files = %+v, want %+v", r.Files, want)

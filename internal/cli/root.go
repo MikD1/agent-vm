@@ -8,7 +8,7 @@ var Version = "dev"
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "avm",
-		Short:         "Isolated Lima dev VMs, one per project",
+		Short:         "Isolated Lima dev VMs, one per domain of work",
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -18,6 +18,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newCreateCmd())
 	root.AddCommand(newListCmd(), newDeleteCmd(), newPruneCmd(), newRecreateCmd())
 	root.AddCommand(newShellCmd(), newStartCmd(), newStopCmd(), newRestartCmd())
+	root.AddCommand(newMountCmd(), newUnmountCmd())
 	return root
 }
 

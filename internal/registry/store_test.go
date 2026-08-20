@@ -1,6 +1,9 @@
 package registry
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,13 +12,14 @@ import (
 
 func sampleRecord() Record {
 	return Record{
-		Name:      "my-api",
+		Name:      "work",
 		CreatedAt: time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC),
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		Modules:   []config.ModuleSpec{{Name: "node"}, {Name: "claude"}},
 		Resources: config.Resources{CPUs: 4, Memory: "8GiB", Disk: "120GiB"},
 		User:      "me",
-		Workspace: config.Mount{HostPath: "/Users/me/my-api", GuestPath: "/home/me.linux/my-api"},
+		ConfigDir: "/Users/me/vms/work",
+		Home:      "/home/me.linux",
 	}
 }
 
@@ -25,15 +29,15 @@ func TestStoreRoundTrip(t *testing.T) {
 	if err := s.Write(rec); err != nil {
 		t.Fatal(err)
 	}
-	ok, err := s.Exists("my-api")
+	ok, err := s.Exists("work")
 	if err != nil || !ok {
 		t.Fatalf("Exists = %v, %v", ok, err)
 	}
-	got, err := s.Read("my-api")
+	got, err := s.Read("work")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Name != rec.Name || got.Workspace.HostPath != rec.Workspace.HostPath || got.Modules[1].Name != "claude" {
+	if got.Name != rec.Name || got.ConfigDir != rec.ConfigDir || got.Home != rec.Home || got.Modules[1].Name != "claude" {
 		t.Errorf("round-trip mismatch: %+v", got)
 	}
 }
@@ -73,11 +77,31 @@ func TestStoreRoundTripMounts(t *testing.T) {
 	if err := s.Write(rec); err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Read("my-api")
+	got, err := s.Read("work")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Mounts) != 1 || got.Mounts[0].GuestPath != "/home/me.linux/shared-lib" {
 		t.Errorf("mounts round-trip mismatch: %+v", got.Mounts)
+	}
+}
+
+// TestRecordKeepsEmptyMounts proves an empty mount list survives the round trip
+// as an explicit empty list rather than vanishing from the file.
+func TestRecordKeepsEmptyMounts(t *testing.T) {
+	s := NewStore(t.TempDir())
+	rec := sampleRecord()
+	if err := s.Write(rec); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(s.vmsDir(), "work.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "mounts:") {
+		t.Errorf("an empty mounts list must still be written:\n%s", data)
+	}
+	if strings.Contains(string(data), "workspace:") {
+		t.Errorf("record must not carry a workspace key:\n%s", data)
 	}
 }

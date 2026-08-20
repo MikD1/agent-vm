@@ -13,9 +13,13 @@ modify, and ship work in this repo. Human-facing usage docs live in
 ## 1. What this project is
 
 `agent-vm` is a single Go CLI, **`avm`**, that provisions isolated Linux development
-VMs on macOS via [Lima](https://lima-vm.io/) — one VM per project, each carrying only
-the tools its project selects. It exists so AI agents can work in throwaway, isolated
-environments without polluting the host.
+VMs on macOS via [Lima](https://lima-vm.io/) — one VM per domain of work, each carrying
+only the tools that domain selects. It exists so AI agents can work in throwaway,
+isolated environments without polluting the host.
+
+A VM is described by its own folder on the host: `agent-vm.yaml` lives there,
+together with everything delivered into the guest — agent configs, keys,
+certificates, provisioning scripts.
 
 - **Module path:** `github.com/MikD1/agent-vm`
 - **Binary:** `avm` (entrypoint `cmd/avm/main.go`)
@@ -79,7 +83,8 @@ test (the Lima layer is faked in tests — see §6).
 cmd/avm/main.go                 entrypoint: calls cli.Execute(), then prints error + os.Exit(1)
 internal/
   cli/        cobra commands (one file per command) — the only package that wires everything
-  config/     Project Spec schema, defaults, validation, flags>spec>defaults resolution
+  config/     VM Spec schema, defaults, validation, flags>spec>defaults resolution
+  specedit/   comment-preserving edits to agent-vm.yaml (yaml.Node, not re-marshal)
   registry/   VM Records (host store ~/.config/agent-vm/vms/) + Lima reconciliation
   lima/       limactl wrapper — the ONLY package that shells out to limactl
   provision/  phase planner + go:embed of scripts/*.sh — drives the bash phases via lima;
@@ -87,15 +92,15 @@ internal/
               installation is NOT a script here — it is one rendered `mise install`
               built from the resolved config's Modules ([]config.ModuleSpec).
   vmname/     VM name normalization / validation
-  templates/  go:embed of the Lima base template + the .agent-vm.yaml init template
+  templates/  go:embed of the Lima base template + the agent-vm.yaml init template
 internal/provision/scripts/*.sh   platform provisioning bash (embedded into the binary):
                                    system, base, docker, mise — never per-tool scripts
 internal/templates/files/*        base.yaml (Lima) + agent-vm.yaml (Spec template)
 ```
 
 Import direction (a DAG — never create a cycle): `cmd/avm → cli`; `cli` is the wiring
-layer and fans out to `{config, registry, provision, lima, templates, vmname}`;
-`provision → {config, lima}`; `registry → config`. `internal/config` has
+layer and fans out to `{config, specedit, registry, provision, lima, templates, vmname}`;
+`specedit → config`; `provision → {config, lima}`; `registry → config`. `internal/config` has
 **zero** internal dependencies (pure domain types).
 
 ---
@@ -123,26 +128,28 @@ layer and fans out to `{config, registry, provision, lima, templates, vmname}`;
 
 ### The config types (Spec → Resolved → Record)
 
-- **`config.Spec`** (`internal/config/spec.go`) — the portable, human-authored Project
-  Spec (`.agent-vm.yaml`): `Modules *[]ModuleSpec`, `Resources`, `Base`. `Modules` is a
-  **pointer on purpose**: `nil` (key absent → defaults may apply) is semantically
-  different from an explicit empty list (no tools beyond the always-installed platform).
-  Do not "simplify" it to `[]ModuleSpec`. Each `ModuleSpec` is a mise tool reference (name
-  + optional version) accepting either a bare scalar (`- claude`) or a single-key mapping
-  (`- node: lts`) in YAML, or `name@version` (`node@lts`) on the `--modules` flag via
-  `ParseModuleRef`. The Spec carries **no** workspace paths — the host path is the
-  directory `avm create` runs in, and both it and the derived guest path are recorded
-  only in the Record.
+- **`config.Spec`** (`internal/config/spec.go`) — the portable, human-authored VM
+  Spec (`agent-vm.yaml`): `Name`, `Modules *[]ModuleSpec`, `Resources`, `Base`,
+  `Mounts`, `Files`, `Scripts`. `Modules` is a **pointer on purpose**: `nil` (key
+  absent → defaults may apply) is semantically different from an explicit empty
+  list (no tools beyond the always-installed platform). Do not "simplify" it to
+  `[]ModuleSpec`. Each `ModuleSpec` is a mise tool reference (name + optional
+  version) accepting either a bare scalar (`- claude`) or a single-key mapping
+  (`- node: lts`) in YAML, or `name@version` (`node@lts`) on the `--modules` flag
+  via `ParseModuleRef`. `Mounts` entries are absolute or `~/`-prefixed host paths
+  — never relative, so a VM's contents do not depend on where its folder sits.
+  The absolute path of the folder itself is a create-time fact recorded as
+  `ConfigDir` in the Record.
 - **`config.Resolved`** (`internal/config/resolve.go`) — the bridge produced by
   `config.Resolve`. Both the Lima config and the Record are built from it.
 - **`registry.Record`** (`internal/registry/record.go`) — the host-local materialization
-  of one VM (resolved spec + create-time facts: `CreatedAt`, `User`, `Workspace`). Build
-  it **only** via `registry.FromResolved(resolved, now)`; never hand-construct a Record
-  or duplicate resolution logic.
+  of one VM (resolved spec + create-time facts: `CreatedAt`, `User`, `ConfigDir`, `Home`).
+  Build it **only** via `registry.FromResolved(resolved, now)`; never hand-construct a
+  Record or duplicate resolution logic.
 
 ### Config resolution order
 
-Precedence is **flags > in-repo `.agent-vm.yaml` > built-in defaults**, implemented
+Precedence is **flags > in-repo `agent-vm.yaml` > built-in defaults**, implemented
 entirely in `config.Resolve` using the `firstInt`/`firstStr` helpers plus the
 `Default*` constants in `internal/config/defaults.go`. To make an unset flag not shadow
 the spec, a `*Set bool` companion is wired from cobra's `cmd.Flags().Changed("…")`
@@ -190,16 +197,17 @@ These are **platform scripts**, not per-tool scripts — there is no script per 
 The full phase sequence, driven from `Provisioner.Run` (`internal/provision/provision.go`):
 
 1. **Phase 0** — create + start the VM (Lima).
-2. **Phase 1** — `system.sh`: host CA certs into the trust store, trust env globally.
+2. **Phase 1** — `system.sh`: host CA certs from `$VM_CONFIG/ca-certificates` into the
+   trust store, trust env globally.
 3. **Phase 2** — platform, always installed, never selected by a project: `base.sh`
    (apt packages, sanitized gitconfig), `docker.sh`, `mise.sh` (installs mise itself).
 4. **Phase 3** — tools, in **one** mise invocation: a rendered `mise install` built from
    the resolved config's `Modules []config.ModuleSpec`, followed by `mise ls -i -J` to
    read back what mise actually resolved (for the Record's `installedTools`; see §4's
    `guestScript` note — this is Go-rendered, not an embedded script).
-5. **Phase 4** — config files: copy each `files` entry from its mount to its destination.
+5. **Phase 4** — config files: copy each `files` entry from `$VM_CONFIG` to its destination.
 6. **Phase 5** — user scripts, in spec order (arbitrary bash a project supplies via
-   `scripts:` in `.agent-vm.yaml` — not to be confused with the embedded platform
+   `scripts:` in `agent-vm.yaml` — not to be confused with the embedded platform
    scripts this section is about).
 7. **Phase 6** — restart, unconditionally.
 
@@ -232,14 +240,10 @@ redundant (about half the existing scripts include it for clarity; both styles a
 | Variable | Value | Use |
 |----------|-------|-----|
 | `VM_USER` | unprivileged guest user | `sudo -u "$VM_USER" -H …`, `usermod` |
-| `VM_PROJECT` | project / VM name | labels, naming |
-| `VM_WORKSPACE` | absolute path to code in the guest | mount point of the host project dir |
-| `VM_SECRETS` | `/mnt/host/agent-vm` (**read-only** virtiofs) | `files` entries anchored under `~/.config/agent-vm/`; `base.sh` reads a sanitized `.gitconfig` from here |
+| `VM_HOME` | the guest home | the root every project mounts under |
+| `VM_CONFIG` | `/mnt/host/vm` (**read-only** virtiofs) | the VM directory: `files` sources, `ca-certificates/`, and the sanitized `.gitconfig` `base.sh` reads |
 
-Do not invent new contract vars and do not read anything outside `$VM_SECRETS`. There is
-no per-tool config directory (no `$VM_SECRETS/modules/<name>/`) — mise-installed tools
-take their config from wherever the tool itself expects it, typically written there by a
-`files` entry in the Spec.
+Do not invent new contract vars and do not read anything outside `$VM_CONFIG`.
 
 ### Rules for platform scripts
 
@@ -315,7 +319,7 @@ These are two different things — don't confuse them.
 
 **Adding a tool needs no code change at all**, if it's in mise's registry (or reachable
 via a mise backend like `npm:`/`aqua:`/`cargo:`). A user just adds it to `modules:` in
-their `.agent-vm.yaml` (or `--modules=name@version` on `avm create`) — Phase 3 renders it
+their `agent-vm.yaml` (or `--modules=name@version` on `avm create`) — Phase 3 renders it
 into the one `mise install` invocation. There is nothing to embed, register, or test in
 this repo for that case; if a request describes "adding a new module," check first
 whether it's really just a mise tool reference the user can add to their own Spec.
@@ -350,8 +354,8 @@ Canonical small examples: `internal/cli/list.go`, `internal/cli/delete.go`.
    `run<Name>(ctx, c *lima.Client, store *registry.Store, …)` holding the logic with
    injected deps; and `new<Name>Cmd() *cobra.Command` wiring `Use`/`Short`/`Args`/`RunE`
    and obtaining deps inside `RunE`. For VM-targeting commands, resolve the name with
-   `resolveTargetName(arg, cwd())` (explicit arg > basename of the cwd that contains a
-   `.agent-vm.yaml` > error).
+   `resolveTargetName(arg, cwd())` (explicit arg > basename of the cwd that contains an
+   `agent-vm.yaml` > error).
    Lifecycle-style verbs can reuse the `lifecycleCmd` helper.
 2. **Register it** in `internal/cli/root.go` with `root.AddCommand(new<Name>Cmd())`.
    *(This is silent if omitted — the package compiles and tests pass while the command is
@@ -360,7 +364,7 @@ Canonical small examples: `internal/cli/list.go`, `internal/cli/delete.go`.
 4. Docs: add rows to the Commands table in `README.md` and the Command Surface table in
    `docs/architecture.md` §9.
 
-### C. Add a Project Spec field
+### C. Add a VM Spec field
 
 A field flows: YAML → `Spec` → validated → `Resolve` (flags>spec>default) → `Resolved` →
 written into the `Record` and/or the Lima config. Touch each stage:
@@ -382,7 +386,7 @@ written into the `Record` and/or the Lima config. Touch each stage:
 7. `internal/templates/files/agent-vm.yaml` — surface it (often commented) for `avm init`.
 8. Tests: `internal/config/spec_test.go` (parse), `resolve_test.go` (precedence +
    validation), registry tests if persisted.
-9. Docs: update the `.agent-vm.yaml` example in `README.md` and `docs/architecture.md` §3.
+9. Docs: update the `agent-vm.yaml` example in `README.md` and `docs/architecture.md` §3.
 
 ---
 
@@ -407,7 +411,7 @@ type(scope): imperative subject
   changes now.)
 
 Examples from history:
-- `feat(cli): show additional mount count in avm list`
+- `feat(registry): record the tool versions mise resolved`
 - `feat(provision): scripts section for user provisioning`
 - `docs(architecture): sync with implemented design`
 
@@ -452,8 +456,9 @@ git log --oneline origin/main..HEAD
 
 ## 9. Security & isolation notes
 
-- Each project runs in its own VM; secrets are mounted **read-only** from the host at
-  `/mnt/host/agent-vm`.
+- Each domain of work runs in its own VM; the VM's own directory is mounted
+  **read-only** at `/mnt/host/vm`, and it is the only host folder the guest reads
+  besides the projects in `mounts`.
 - Git credentials stay on the host: commit/diff/branch happen inside the VM, push/pull
   on the host — no keys or tokens are copied into the guest.
 - The certificate model is centralized in Phase 1 (`system.sh`); modules stay unaware of
