@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -137,5 +138,40 @@ func TestMiseScriptChecksumAwkToleratesDotSlashPrefix(t *testing.T) {
 	}
 	if !strings.Contains(checkOut.String(), "OK") {
 		t.Fatalf("sha256sum -c did not report OK: %s", checkOut.String())
+	}
+}
+
+// TestMiseVersionCoversAquaClaudeFix guards the pin against being lowered back
+// into the range where `claude` cannot install. mise resolves the module to the
+// aqua package anthropics/claude-code, which serves current versions through a
+// version_override that switches the package type to github_release. Releases
+// before v2026.8.5 dropped that explicit type, kept the parent http package's
+// empty url and aborted phase 3 with "builder error: relative URL without a
+// base"; v2026.8.9 added the glibc-over-musl asset preference the same package
+// relies on. Anything older breaks every VM whose spec lists claude.
+func TestMiseVersionCoversAquaClaudeFix(t *testing.T) {
+	const minYear, minMonth, minPatch = 2026, 8, 9
+
+	m := regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)$`).FindStringSubmatch(miseVersion)
+	if m == nil {
+		t.Fatalf("miseVersion = %q, want a vYYYY.M.P release tag", miseVersion)
+	}
+	var got [3]int
+	for i := range got {
+		n, err := strconv.Atoi(m[i+1])
+		if err != nil {
+			t.Fatalf("miseVersion = %q: %v", miseVersion, err)
+		}
+		got[i] = n
+	}
+	want := [3]int{minYear, minMonth, minPatch}
+	for i := range got {
+		if got[i] > want[i] {
+			return
+		}
+		if got[i] < want[i] {
+			t.Fatalf("miseVersion = %q, want v%d.%d.%d or newer (older mise cannot install the claude module)",
+				miseVersion, minYear, minMonth, minPatch)
+		}
 	}
 }
