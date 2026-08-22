@@ -42,7 +42,7 @@ list the projects it works on:
 mkdir -p ~/vms/work && cd ~/vms/work
 avm init                 # write agent-vm.yaml, then edit it
 avm create               # create + provision the VM (Record + VM)
-avm shell work           # open a shell in the VM
+avm shell work           # open a shell in the VM (lands in the guest home)
 ```
 
 Each project in `mounts` is mounted read/write at `~/<name>` in the guest; you
@@ -83,7 +83,7 @@ Two projects with the same folder name collide at `~/<name>`; pass
 | `avm list [name]` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state. With a name, show that VM's mounts and tools. |
 | `avm mount <vm> [path]` | Mount a project folder into a VM. `--name` overrides the guest directory name. |
 | `avm unmount <vm> <path\|name>` | Detach a project folder from a VM. |
-| `avm shell [name]` | Open a shell in the VM. |
+| `avm shell [name]` | Open a shell in the VM, at the guest home (`~`), with each mounted project one `cd` away. |
 | `avm start/stop/restart [name]` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM and remove its record. `--force` skips confirmation. |
 | `avm prune [name]` | Remove orphaned records (record without a VM). |

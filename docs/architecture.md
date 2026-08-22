@@ -332,7 +332,7 @@ live guest. The two cases are therefore:
 | `avm list [name]` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged. With a name, show that VM's mounts and tools. |
 | `avm mount <vm> [path]` | Attach a project folder; updates Spec, Record and the running VM. |
 | `avm unmount <vm> <path\|name>` | Detach a project folder. |
-| `avm shell [name]` | Open a shell in the VM (at the guest home). |
+| `avm shell [name]` | Open a shell in the VM (at the guest home, passed to `limactl shell --workdir` from the Record's `home`; without it Lima would try to `cd` into host paths that do not exist in the guest). |
 | `avm start / stop / restart [name]` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM **and** remove its Record. |
 | `avm prune [name]` | Remove orphaned records (record without a VM). |

@@ -23,10 +23,11 @@ type Record struct {
 	// mount`, run from a project folder, could not find the config to update.
 	ConfigDir string `yaml:"configDir"`
 	// Home is the guest home resolved at create time. `avm mount` needs it to
-	// build a new mount's guest path: `limactl info` reports the home of the
-	// template, not of this VM, so reading it later would depend on the Lima
-	// version installed at that moment. The Record is a snapshot of creation
-	// facts, and home is one of them.
+	// build a new mount's guest path, and `avm shell` to pick its workdir:
+	// `limactl info` reports the home of the template, not of this VM, so
+	// reading it later would depend on the Lima version installed at that
+	// moment. The Record is a snapshot of creation facts, and home is one of
+	// them.
 	Home string `yaml:"home"`
 	// Mounts carries no omitempty: an empty mount list is a valid and meaningful
 	// state, and it should be visible in the file.
