@@ -55,25 +55,27 @@ test (the Lima layer is faked in tests — see §6).
 | Run one package | `go test ./internal/cli` | |
 | Run one test | `go test ./internal/cli -run TestRootHasVerbosePersistentFlag` | `-run` is a regex; add `-v` for verbose. |
 | Vet | `make vet` (`go vet ./...`) | |
+| Format | `make fmt` (`gofmt -w cmd internal`) | Rewrites in place. |
+| Check formatting | `make fmt-check` | Fails, listing the offending files, if `gofmt -l cmd internal` is non-empty. |
 | Shellcheck guest scripts | `make shellcheck` | `shellcheck internal/provision/scripts/*.sh`. |
-| Lint (vet + shellcheck) | `make lint` | |
-| **Default gate** | `make all` | Runs **vet → test → build only**. |
+| Lint (fmt-check + vet + shellcheck) | `make lint` | |
+| **Default gate** | `make all` | Runs **fmt-check → vet → test → build only**. |
 
 ### Critical tooling facts
 
-- **`make all` does NOT run shellcheck.** It is `vet → test → build`. If you edit any
-  `internal/provision/scripts/*.sh`, you must additionally run `make shellcheck`
+- **`make all` does NOT run shellcheck.** It is `fmt-check → vet → test → build`. If you
+  edit any `internal/provision/scripts/*.sh`, you must additionally run `make shellcheck`
   (or `make lint`).
-- **There is no CI and no `CONTRIBUTING.md`.** No `.github/` workflow runs these checks
-  on push. The local gates are the *only* safety net — running them before every PR is
-  mandatory, not optional.
-- **"Lint" means exactly `go vet` + `shellcheck`.** There is no `golangci-lint` and no
-  `.golangci*` config. Do not introduce one or assume linters that aren't here.
-- **`gofmt` caveat:** two existing files — `internal/cli/target_test.go` and
-  `internal/lima/logfilter_test.go` — are already flagged by `gofmt -l` (column
-  alignment of one-line bodies). A blanket `gofmt -l .` is therefore non-empty on a
-  clean checkout. Format only files you touch; do not reformat those two unless you're
-  already editing them.
+- **CI runs the same targets** (`.github/workflows/ci.yml`: `make fmt-check`, `make vet`,
+  `make build`, `make test`, plus `make shellcheck` in its own job; `release.yml` runs all
+  of them). There is no `CONTRIBUTING.md`. CI is a second net, not a substitute: run the
+  local gates before every PR.
+- **"Lint" means exactly `gofmt` + `go vet` + `shellcheck`.** There is no `golangci-lint`
+  and no `.golangci*` config. Do not introduce one or assume linters that aren't here.
+- **The tree is `gofmt`-clean and stays that way.** `make fmt-check` (part of `make all`
+  and of CI) fails on any unformatted file under `cmd/` or `internal/`; `make fmt` fixes
+  it. Never commit a formatting-only change to a file your work does not otherwise
+  touch — it buries the real diff.
 
 ---
 
@@ -432,15 +434,15 @@ Remote is `https://github.com/MikD1/agent-vm.git`; default branch is `main`.
 ### Pre-PR checklist (copy-paste)
 
 ```bash
-# 1. Go gate: vet + test + build
+# 1. Go gate: fmt-check + vet + test + build
 make all
 
 # 2. Shell lint — ONLY if you touched internal/provision/scripts/*.sh
 #    (make all does NOT run shellcheck)
 make shellcheck
 
-# 3. Format only files you changed (do not reformat the two pre-flagged test files)
-gofmt -l <files-you-edited>
+# 3. If step 1 failed on fmt-check, format and re-run it
+make fmt
 
 # 4. Review your branch
 git status

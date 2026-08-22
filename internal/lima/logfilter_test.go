@@ -24,10 +24,10 @@ func runFilter(t *testing.T, verbose bool, writes ...string) string {
 
 func TestLogFilter(t *testing.T) {
 	tests := []struct {
-		name        string
-		verbose     bool
-		writes      []string
-		want        string
+		name    string
+		verbose bool
+		writes  []string
+		want    string
 	}{
 		{
 			name:    "info dropped in normal mode",

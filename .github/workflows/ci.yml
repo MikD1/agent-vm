@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   go:
-    name: Go (vet, build, test)
+    name: Go (fmt, vet, build, test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,7 @@ jobs:
         with:
           # Read the Go version straight from go.mod so CI never drifts.
           go-version-file: go.mod
+      - run: make fmt-check
       - run: make vet
       - run: make build
       - run: make test
