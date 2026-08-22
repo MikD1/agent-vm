@@ -11,5 +11,11 @@ resources:
   memory: 4GiB
   disk: 120GiB
 
+files:
+  # claude-settings.json: ~/.claude/settings.json
+
+scripts:
+  # - provision/postgres.sh
+
 mounts:
   # - ~/projects

@@ -107,6 +107,12 @@ func TestSpecTemplateParsesAsASpec(t *testing.T) {
 	if node.Version != "lts" {
 		t.Errorf("template node version = %q, want \"lts\" (the LTS opinion lives in the template)", node.Version)
 	}
+	// files: and scripts: ship as bare keys. Neither is a pointer in the Spec,
+	// so an empty section is indistinguishable from an absent one — the sections
+	// are there to be filled in, and declare nothing until they are.
+	if len(s.Files) != 0 || len(s.Scripts) != 0 {
+		t.Errorf("template must declare no files/scripts, got %v / %v", s.Files, s.Scripts)
+	}
 	// Docker is platform, not a module.
 	for _, m := range *s.Modules {
 		if m.Name == "docker" {
