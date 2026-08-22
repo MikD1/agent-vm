@@ -1,46 +1,15 @@
-# The name of this VM. Defaults to the name of the folder this file sits in.
-# name: work
+name: {{.Name}}
 
-# Tools for this VM. Every entry is a mise tool: a name, optionally with a
-# version. A name with no version installs the latest release, so pin what you
-# care about. Anything in the mise registry works, as do backend references like
-# npm:@openai/codex — avm needs no change to support a new tool.
+# https://mise-versions.jdx.dev
 modules:
   - node: lts
   - claude
-  # - go: "1.24"
-  # - dotnet: "10"
-  # - python: "3.12"
+  - codex
 
 resources:
   cpus: 4
   memory: 4GiB
   disk: 120GiB
 
-# Host files to copy into the guest. Sources are relative to this file, or
-# absolute — but they must sit inside this folder: it is the only host directory
-# a files: source can be read from. Keep credentials here, out of any project
-# repository.
-# files:
-#   claude-settings.json: ~/.claude/settings.json
-#   tmux.conf: ~/.tmux.conf
-#   codex-auth.json:
-#     to: ~/.codex/auth.json
-#     mode: "0600"
-
-# Bash to run after the tools are installed and the files are in place. Runs as
-# root with VM_USER, VM_HOME, and VM_CONFIG set. To use a tool mise installed,
-# drop to the VM user's login shell:
-#   sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
-# scripts:
-#   - provision/postgres.sh
-
-# The projects this VM works on. Each is mounted read/write at ~/<name>, where
-# name defaults to the folder's basename. Paths must be absolute or start with
-# ~/. Use the {path, name} form when two projects share a basename. You can also
-# attach a project later with `avm mount`.
-#   - ~/projects/api
-#   - /Users/me/work/web
-#   - path: ~/other/api
-#     name: api-legacy
 mounts:
+  # - ~/projects
