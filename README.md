@@ -249,11 +249,12 @@ Each script runs as root with a small env contract: `VM_USER`, `VM_HOME`,
 `VM_CONFIG` (`/mnt/host/vm`, the VM directory, read-only).
 
 A phase is quiet while it runs: `avm` buffers the guest's stdout and streams only
-its stderr. Phase 2 downloads mise (~95 MB) from GitHub's release CDN — a host
-none of the earlier phases touch — so a network path that blocks or throttles it
-fails there and nowhere else. That download is bounded (connect timeout, stall
-guard, retries) and reports the address to test by hand, rather than waiting
-forever with nothing on screen.
+its stderr. Phase 2 downloads mise from GitHub's release CDN — a host none of the
+earlier phases touch — so a network path that blocks or throttles it fails there
+and nowhere else. That download takes the compressed archive (~22 MB, not the
+~95 MB bare binary), is bounded (connect timeout, stall guard, retries), resumes
+a partial file instead of restarting it, and prints its progress every 20s. A
+failure names the URL to measure by hand.
 
 ### Custom CA certificates
 

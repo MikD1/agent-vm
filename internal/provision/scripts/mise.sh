@@ -20,35 +20,70 @@ if ! command -v mise >/dev/null 2>&1; then
     *) echo "Error: unsupported architecture $(dpkg --print-architecture)" >&2; exit 1 ;;
   esac
 
-  asset="mise-${MISE_VERSION}-linux-${arch}"
+  # Take the compressed tarball, not the bare binary: the same mise is ~95 MB
+  # unpacked, ~22 MB as .tar.xz and ~37 MB as .tar.gz. GitHub serves release
+  # downloads from a separate CDN (release-assets.githubusercontent.com), the
+  # first host this phase sequence touches that is neither an Ubuntu mirror nor
+  # download.docker.com; where that path is throttled, the 4x smaller asset is
+  # the difference between a phase that finishes and one that looks hung. xz
+  # ships with the Ubuntu base image — fall back to gzip if an image drops it.
+  ext=tar.xz
+  command -v xz >/dev/null 2>&1 || ext=tar.gz
+
+  asset="mise-${MISE_VERSION}-linux-${arch}.${ext}"
   base="https://github.com/jdx/mise/releases/download/${MISE_VERSION}"
 
   # Download to /var/tmp (main disk), not /tmp, which is a small tmpfs — the same
   # gotcha the previous dotnet and go modules hit.
   #
-  # The asset is ~95 MB, and GitHub redirects release downloads to a separate CDN
-  # host (release-assets.githubusercontent.com) — the first host this phase
-  # sequence touches that is neither an Ubuntu mirror nor download.docker.com. A
-  # bare `curl -fsSL` there is silent and unbounded: on a path that blocks or
-  # throttles that CDN it waits forever, and since lima.Provision buffers the
-  # guest's stdout and streams only stderr, Phase 2 prints nothing at all. The run
-  # is then indistinguishable from a hang, with no error to act on. So: bound the
-  # connect, give up on a transfer stalled below 1 KB/s for a minute, retry a few
-  # times, and report on stderr — the stream that reaches the terminal live.
+  # A bare `curl -fsSL` here is silent and unbounded: on a path that blocks or
+  # throttles the CDN it waits forever, and since lima.Provision buffers the
+  # guest's stdout and streams only stderr, Phase 2 prints nothing at all — the
+  # run is indistinguishable from a hang, with no error to act on. So: bound the
+  # connect; treat a transfer crawling under 8 KB/s for 30s as stuck and start
+  # over; resume from what is already on disk (-C -) so a retry costs only the
+  # remainder; and report on stderr, the stream that reaches the terminal live.
   fetch() {
     curl -fL \
       --connect-timeout 15 \
-      --speed-limit 1024 --speed-time 60 \
-      --retry 3 --retry-delay 3 --retry-all-errors \
+      --speed-limit 8192 --speed-time 30 \
+      --retry 5 --retry-delay 3 --retry-all-errors \
+      --continue-at - \
       --no-progress-meter \
       -o "$1" "$2"
   }
 
-  echo "mise: downloading ${asset} (~95 MB)" >&2
-  if ! fetch "/var/tmp/${asset}" "${base}/${asset}"; then
+  # curl's own progress meter redraws one line with \r, and avm's log filter is
+  # line-buffered — the whole meter would arrive as a single blob when the phase
+  # ends. Print a real line every ~20s instead, so a slow download is visibly
+  # alive. The ticker sleeps in short steps so that killing it below leaves no
+  # child holding the SSH channel open for longer than a moment.
+  progress_ticker() {
+    tick=0
+    while sleep 2; do
+      tick=$((tick + 1))
+      if [ $((tick % 10)) -eq 0 ] && [ -f "$1" ]; then
+        echo "mise: $(du -m "$1" | cut -f1) MB so far" >&2
+      fi
+    done
+  }
+
+  echo "mise: downloading ${asset}" >&2
+  progress_ticker "/var/tmp/${asset}" &
+  ticker=$!
+  trap 'kill "$ticker" 2>/dev/null || true' EXIT
+  fetch_status=0
+  fetch "/var/tmp/${asset}" "${base}/${asset}" || fetch_status=$?
+  kill "$ticker" 2>/dev/null || true
+  trap - EXIT
+
+  if [ "$fetch_status" -ne 0 ]; then
     echo "Error: could not download ${base}/${asset}" >&2
-    echo "       The VM has no working path to GitHub release assets. Check it with:" >&2
-    echo "         curl -v --max-time 20 -Lo /dev/null ${base}/${asset}" >&2
+    echo "       The VM has no usable path to GitHub release assets. Measure it with:" >&2
+    echo "         curl -o /dev/null --max-time 30 -w 'bytes/sec: %{speed_download}' -L ${base}/${asset}" >&2
+    if [ -s "/var/tmp/${asset}" ]; then
+      echo "       $(du -m "/var/tmp/${asset}" | cut -f1) MB is on disk at /var/tmp/${asset}; the next run resumes from there." >&2
+    fi
     exit 1
   fi
   fetch /var/tmp/mise-SHASUMS256.txt "${base}/SHASUMS256.txt"
@@ -60,14 +95,23 @@ if ! command -v mise >/dev/null 2>&1; then
   # so strip that prefix before comparing and re-print without it — the file on
   # disk at /var/tmp/${asset} has no "./" prefix, and sha256sum -c expects the
   # printed filename to match what it opens. Run from /var/tmp so it resolves.
-  (
+  #
+  # A resumed download that went wrong lands here, so discard the archive on a
+  # mismatch: keeping it would poison every later run with the same failure.
+  if ! (
     cd /var/tmp
     awk -v f="$asset" '{ n = $2; sub(/^\.\//, "", n) } n == f { print $1 "  " n; found = 1 } END { exit !found }' \
       mise-SHASUMS256.txt | sha256sum -c -
-  )
+  ); then
+    rm -f "/var/tmp/${asset}"
+    echo "Error: ${asset} failed checksum verification; the file was discarded" >&2
+    exit 1
+  fi
 
-  install -m 0755 "/var/tmp/${asset}" /usr/local/bin/mise
-  rm -f "/var/tmp/${asset}" /var/tmp/mise-SHASUMS256.txt
+  # The archive holds mise/bin/mise plus docs; only the binary is installed.
+  tar -xf "/var/tmp/${asset}" -C /var/tmp
+  install -m 0755 /var/tmp/mise/bin/mise /usr/local/bin/mise
+  rm -rf "/var/tmp/${asset}" /var/tmp/mise-SHASUMS256.txt /var/tmp/mise
 fi
 
 # MISE_DATA_DIR must be exported globally, not only while provisioning: a shim is
