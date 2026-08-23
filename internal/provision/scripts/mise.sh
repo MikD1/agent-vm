@@ -21,28 +21,21 @@ if ! command -v mise >/dev/null 2>&1; then
   esac
 
   # Take the compressed tarball, not the bare binary: the same mise is ~95 MB
-  # unpacked, ~22 MB as .tar.xz and ~37 MB as .tar.gz. GitHub serves release
-  # downloads from a separate CDN (release-assets.githubusercontent.com), the
-  # first host this phase sequence touches that is neither an Ubuntu mirror nor
-  # download.docker.com; where that path is throttled, the 4x smaller asset is
-  # the difference between a phase that finishes and one that looks hung. xz
-  # ships with the Ubuntu base image — fall back to gzip if an image drops it.
+  # unpacked but ~22 MB as .tar.xz and ~37 MB as .tar.gz. xz ships with the
+  # Ubuntu base image — fall back to gzip if an image drops it.
   ext=tar.xz
   command -v xz >/dev/null 2>&1 || ext=tar.gz
 
   asset="mise-${MISE_VERSION}-linux-${arch}.${ext}"
   base="https://github.com/jdx/mise/releases/download/${MISE_VERSION}"
 
-  # Download to /var/tmp (main disk), not /tmp, which is a small tmpfs — the same
-  # gotcha the previous dotnet and go modules hit.
+  # Download to /var/tmp (main disk), not /tmp, which is a small tmpfs.
   #
-  # A bare `curl -fsSL` here is silent and unbounded: on a path that blocks or
-  # throttles the CDN it waits forever, and since lima.Provision buffers the
-  # guest's stdout and streams only stderr, Phase 2 prints nothing at all — the
-  # run is indistinguishable from a hang, with no error to act on. So: bound the
-  # connect; treat a transfer crawling under 8 KB/s for 30s as stuck and start
-  # over; resume from what is already on disk (-C -) so a retry costs only the
-  # remainder; and report on stderr, the stream that reaches the terminal live.
+  # A bare `curl -fsSL` is silent and unbounded, and lima.Provision buffers the
+  # guest's stdout while streaming only stderr — so a download that never
+  # progresses would print nothing and look exactly like a hang. Hence: bound the
+  # connect, give up on a transfer crawling under 8 KB/s for 30s, resume from
+  # what is already on disk (-C -), and report on stderr.
   fetch() {
     curl -fL \
       --connect-timeout 15 \
@@ -53,11 +46,10 @@ if ! command -v mise >/dev/null 2>&1; then
       -o "$1" "$2"
   }
 
-  # curl's own progress meter redraws one line with \r, and avm's log filter is
-  # line-buffered — the whole meter would arrive as a single blob when the phase
-  # ends. Print a real line every ~20s instead, so a slow download is visibly
-  # alive. The ticker sleeps in short steps so that killing it below leaves no
-  # child holding the SSH channel open for longer than a moment.
+  # curl's own progress meter redraws one line with \r, which avm's line-buffered
+  # log filter would hold back until the phase ends. Print a real line every ~20s
+  # instead, so a slow download is visibly alive. The ticker sleeps in short steps
+  # so killing it below leaves no child holding the SSH channel open.
   progress_ticker() {
     tick=0
     while sleep 2; do
@@ -79,7 +71,7 @@ if ! command -v mise >/dev/null 2>&1; then
 
   if [ "$fetch_status" -ne 0 ]; then
     echo "Error: could not download ${base}/${asset}" >&2
-    echo "       The VM has no usable path to GitHub release assets. Measure it with:" >&2
+    echo "       Measure the path from inside the VM with:" >&2
     echo "         curl -o /dev/null --max-time 30 -w 'bytes/sec: %{speed_download}' -L ${base}/${asset}" >&2
     if [ -s "/var/tmp/${asset}" ]; then
       echo "       $(du -m "/var/tmp/${asset}" | cut -f1) MB is on disk at /var/tmp/${asset}; the next run resumes from there." >&2
@@ -91,13 +83,11 @@ if ! command -v mise >/dev/null 2>&1; then
   # Verify against the published digest before trusting the binary. Match the
   # filename with awk on the exact field rather than grep, so neither the dots in
   # the version nor the sibling "-musl" asset can match by accident. mise's
-  # SHASUMS256.txt lists filenames "./"-prefixed (e.g. "./mise-v2026.8.4-linux-x64"),
-  # so strip that prefix before comparing and re-print without it — the file on
-  # disk at /var/tmp/${asset} has no "./" prefix, and sha256sum -c expects the
-  # printed filename to match what it opens. Run from /var/tmp so it resolves.
-  #
-  # A resumed download that went wrong lands here, so discard the archive on a
-  # mismatch: keeping it would poison every later run with the same failure.
+  # SHASUMS256.txt lists filenames "./"-prefixed, so strip that prefix before
+  # comparing and re-print without it: the file on disk has none, and
+  # `sha256sum -c` opens exactly the name it is given. Run from /var/tmp so it
+  # resolves. Discard the archive on a mismatch — a bad resume kept on disk would
+  # poison every later run.
   if ! (
     cd /var/tmp
     awk -v f="$asset" '{ n = $2; sub(/^\.\//, "", n) } n == f { print $1 "  " n; found = 1 } END { exit !found }' \
