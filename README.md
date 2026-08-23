@@ -237,7 +237,8 @@ Phase 1  system layer — install host CA certs into the trust store, export tru
          env globally (tools never touch certificates)
 Phase 2  platform — apt packages, Docker, mise itself; always installed, never
          selected by a project
-Phase 3  tools — one `mise install` for every module in the spec
+Phase 3  tools — one `mise install` for every module in the spec, retried up
+         to three times so a stalled download does not cost the whole VM
 Phase 4  config files — copy each `files` entry from the VM directory to its
          guest destination
 Phase 5  user scripts — run each `scripts` entry, in order, as root

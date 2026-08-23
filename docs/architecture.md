@@ -194,7 +194,7 @@ sequenceDiagram
     Note over Guest: base packages, Docker, mise itself — always installed, never selected by a project
 
     CLI->>Guest: Phase 3 — tools (sudo bash -s)
-    Note over Guest: one rendered `mise install` for every module in the spec;<br/>`mise ls -i -J` reports back the resolved versions
+    Note over Guest: one rendered `mise install` for every module in the spec,<br/>retried up to three times (mise skips what is installed);<br/>`mise ls -i -J` reports back the resolved versions
 
     CLI->>Guest: Phase 4 — config files (sudo bash -s)
     Note over Guest: copy each `files` entry from /mnt/host/vm to its guest destination

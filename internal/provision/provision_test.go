@@ -2,6 +2,7 @@ package provision
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,7 +197,7 @@ func TestRenderMiseInstall(t *testing.T) {
 		"install -d -m 0755 /etc/mise",
 		miseConfigPath,
 		`"node" = "lts"`,
-		"mise install -y\n",
+		"if mise install -y; then",
 		"mise reshim",
 	} {
 		if !strings.Contains(got, want) {
@@ -205,6 +206,33 @@ func TestRenderMiseInstall(t *testing.T) {
 	}
 	if v := string(renderMiseInstall(nil, true)); !strings.Contains(v, "mise install -y --verbose") {
 		t.Errorf("verbose install missing --verbose:\n%s", v)
+	}
+}
+
+// TestRenderMiseInstallRetries covers the phase's network resilience: every tool
+// comes over the network, and a single stalled download used to cost the whole
+// VM. `mise install` must therefore be attempted more than once, the retry must
+// be announced on stderr (the stream avm renders live), and an exhausted phase
+// must exit non-zero after showing what it did manage to install.
+func TestRenderMiseInstallRetries(t *testing.T) {
+	if miseInstallAttempts < 2 {
+		t.Fatalf("miseInstallAttempts = %d, want at least 2 — one attempt is no retry", miseInstallAttempts)
+	}
+	got := string(renderMiseInstall([]config.ModuleSpec{{Name: "node", Version: "lts"}}, false))
+	for _, want := range []string{
+		fmt.Sprintf("for attempt in $(seq 1 %d); do", miseInstallAttempts),
+		fmt.Sprintf(`echo "Phase 3: mise install failed (attempt $attempt of %d); retrying" >&2`, miseInstallAttempts),
+		"mise ls -i >&2 || true",
+		"exit 1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("renderMiseInstall() does not contain %q:\n%s", want, got)
+		}
+	}
+	// reshim must stay outside the loop, and behind the failure guard: shimming a
+	// half-installed toolset would leave the VM looking provisioned.
+	if strings.Index(got, "exit 1") > strings.Index(got, "mise reshim") {
+		t.Errorf("the failure guard must precede `mise reshim`:\n%s", got)
 	}
 }
 

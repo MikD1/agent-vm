@@ -35,6 +35,38 @@ func renderMiseConfig(mods []config.ModuleSpec) []byte {
 	return b.Bytes()
 }
 
+// miseInstallAttempts is how many times phase 3 runs `mise install` before it
+// gives up. Every tool arrives over the network, so a stalled or reset download
+// is this phase's characteristic failure, and mise's own retry lives inside a
+// single invocation — once it returns non-zero the whole phase is lost, and with
+// it the VM, which `avm create` rolls back. An outer attempt is cheap insurance:
+// mise skips whatever is already installed, so a retry only redoes the tools
+// that are still missing.
+const miseInstallAttempts = 3
+
+// miseInstallLoop is the phase 3 install body: %[1]s is the `mise install` flag
+// set, %[2]d the attempt count. It narrates on stderr — the stream avm renders
+// live, while stdout is buffered until the phase ends — so a retry is visible as
+// it happens rather than after the fact, and a phase that finally fails says
+// what did get installed instead of leaving the reader to infer it from mise's
+// log.
+const miseInstallLoop = `for attempt in $(seq 1 %[2]d); do
+	if mise install %[1]s; then
+		mise_installed=1
+		break
+	fi
+	if [ "$attempt" -lt %[2]d ]; then
+		echo "Phase 3: mise install failed (attempt $attempt of %[2]d); retrying" >&2
+		sleep $((attempt * 5))
+	fi
+done
+if [ -z "${mise_installed:-}" ]; then
+	echo "Phase 3: mise could not install every tool in %[2]d attempts. Installed so far:" >&2
+	mise ls -i >&2 || true
+	exit 1
+fi
+`
+
 // renderMiseInstall is the phase 3 script: write the system config, then install
 // every tool in one mise invocation. mise resolves its own ordering and
 // parallelizes downloads, so there is no per-module loop.
@@ -55,7 +87,7 @@ func renderMiseInstall(mods []config.ModuleSpec, verbose bool) []byte {
 	fmt.Fprintf(&b, "cat > %s <<'AVM_MISE_CONFIG_EOF'\n", miseConfigPath)
 	b.Write(renderMiseConfig(mods))
 	b.WriteString("AVM_MISE_CONFIG_EOF\n")
-	fmt.Fprintf(&b, "mise install %s\n", flags)
+	fmt.Fprintf(&b, miseInstallLoop, flags, miseInstallAttempts)
 	b.WriteString("mise reshim\n")
 	return b.Bytes()
 }
