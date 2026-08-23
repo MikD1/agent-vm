@@ -115,7 +115,7 @@ The system has **two** config artifacts with distinct, non-overlapping roles. Th
 | Portable | **yes** — between machines where the projects live at the same paths | no — local instance state |
 | May be absent | no — `avm create` requires it | no — always present for a managed VM |
 
-The VM Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec and writes a Record. Because the Record is self-contained, `recreate`, `list`, and reconciliation work **without** the VM directory or the current directory.
+The VM Spec is the *source*; the VM Record is a *self-contained snapshot* of it. `avm create` reads a Spec and writes a Record. `avm recreate` re-reads the Spec — the model is "change config → `avm recreate`", so a rebuild must not replay a snapshot that predates the edit prompting it — and rewrites the Record from what it built. Because the Record is self-contained, `recreate` still works **without** the VM directory or the current directory: with no readable Spec it falls back to the snapshot, which is what makes an orphaned Record recoverable on a host that never had the folder. `list` and reconciliation read the Record only.
 
 **Config resolution order (one mental model for `avm create`):**
 
@@ -269,7 +269,7 @@ stateDiagram-v2
 
     Ready --> Ready: start / stop / restart / shell
     Ready --> Absent: avm delete (removes VM AND Record)
-    Ready --> Ready: avm recreate (pristine rebuild from Record)
+    Ready --> Ready: avm recreate (pristine rebuild from Spec)
 
     Ready --> OrphanedRecord: VM deleted out-of-band
     OrphanedRecord --> Ready: avm recreate
@@ -283,7 +283,7 @@ stateDiagram-v2
     end note
 ```
 
-`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` reads the Record and rebuilds the VM from scratch (pristine): the mounted host folders are untouched, but anything living only inside the guest — state outside mise, Docker volumes, files written to guest-only directories — is gone. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
+`avm delete <name>` stops and deletes the VM **and** removes the Record. `avm recreate <name>` rebuilds the VM from scratch (pristine): the mounted host folders are untouched, but anything living only inside the guest — state outside mise, Docker volumes, files written to guest-only directories — is gone. It rebuilds from the VM directory's current `agent-vm.yaml`, falling back to the Record when that folder is absent, and reports which of the two it used; the VM name, guest user and guest home always come from the Record, so a renamed `name:` key cannot redirect the rebuild at a different VM. `avm list` reconciles the Registry against Lima and labels each entry: *managed* (consistent), *orphaned* (Record without VM → offer recreate/prune), or *unmanaged* (VM without Record → left untouched). It also shows Lima runtime state as *running*, *stopped*, or `-` for orphaned records with no backing VM.
 
 ## 8. Mounts
 
@@ -328,7 +328,7 @@ live guest. The two cases are therefore:
 |---------|----------|
 | `avm init [path]` | Write an `agent-vm.yaml` VM Spec template. |
 | `avm create [path]` | Create + provision the VM from a VM directory's Spec; write Record + create VM. |
-| `avm recreate <name>` | Pristine rebuild of the VM from its Record. |
+| `avm recreate <name>` | Pristine rebuild of the VM from its `agent-vm.yaml` (its Record when that folder is absent). |
 | `avm list [name]` | Reconcile Registry ↔ Lima; label managed / orphaned / unmanaged. With a name, show that VM's mounts and tools. |
 | `avm mount <vm> [path]` | Attach a project folder; updates Spec, Record and the running VM. |
 | `avm unmount <vm> <path\|name>` | Detach a project folder. |
