@@ -248,6 +248,13 @@ Phase 6  restart — applies group membership (docker) and anything else a live
 Each script runs as root with a small env contract: `VM_USER`, `VM_HOME`,
 `VM_CONFIG` (`/mnt/host/vm`, the VM directory, read-only).
 
+A phase is quiet while it runs: `avm` buffers the guest's stdout and streams only
+its stderr. Phase 2 downloads mise (~95 MB) from GitHub's release CDN — a host
+none of the earlier phases touch — so a network path that blocks or throttles it
+fails there and nowhere else. That download is bounded (connect timeout, stall
+guard, retries) and reports the address to test by hand, rather than waiting
+forever with nothing on screen.
+
 ### Custom CA certificates
 
 Drop PEM root CAs into `<vm-dir>/ca-certificates/`; the Phase 1 system layer

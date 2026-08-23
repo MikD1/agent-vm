@@ -25,8 +25,33 @@ if ! command -v mise >/dev/null 2>&1; then
 
   # Download to /var/tmp (main disk), not /tmp, which is a small tmpfs — the same
   # gotcha the previous dotnet and go modules hit.
-  curl -fsSL "${base}/${asset}" -o "/var/tmp/${asset}"
-  curl -fsSL "${base}/SHASUMS256.txt" -o /var/tmp/mise-SHASUMS256.txt
+  #
+  # The asset is ~95 MB, and GitHub redirects release downloads to a separate CDN
+  # host (release-assets.githubusercontent.com) — the first host this phase
+  # sequence touches that is neither an Ubuntu mirror nor download.docker.com. A
+  # bare `curl -fsSL` there is silent and unbounded: on a path that blocks or
+  # throttles that CDN it waits forever, and since lima.Provision buffers the
+  # guest's stdout and streams only stderr, Phase 2 prints nothing at all. The run
+  # is then indistinguishable from a hang, with no error to act on. So: bound the
+  # connect, give up on a transfer stalled below 1 KB/s for a minute, retry a few
+  # times, and report on stderr — the stream that reaches the terminal live.
+  fetch() {
+    curl -fL \
+      --connect-timeout 15 \
+      --speed-limit 1024 --speed-time 60 \
+      --retry 3 --retry-delay 3 --retry-all-errors \
+      --no-progress-meter \
+      -o "$1" "$2"
+  }
+
+  echo "mise: downloading ${asset} (~95 MB)" >&2
+  if ! fetch "/var/tmp/${asset}" "${base}/${asset}"; then
+    echo "Error: could not download ${base}/${asset}" >&2
+    echo "       The VM has no working path to GitHub release assets. Check it with:" >&2
+    echo "         curl -v --max-time 20 -Lo /dev/null ${base}/${asset}" >&2
+    exit 1
+  fi
+  fetch /var/tmp/mise-SHASUMS256.txt "${base}/SHASUMS256.txt"
 
   # Verify against the published digest before trusting the binary. Match the
   # filename with awk on the exact field rather than grep, so neither the dots in
