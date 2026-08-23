@@ -72,6 +72,7 @@ func TestMiseScriptBoundsItsDownloads(t *testing.T) {
 		"--speed-limit",     // abort a transfer that stalls mid-flight
 		"--speed-time",      //   (both halves of the stall guard)
 		"--retry",           // a blip must not fail the whole phase
+		"--continue-at",     // a retry costs the remainder, not the whole file
 		"mise: downloading", // stdout is buffered, so say it on stderr
 		">&2",               //   (the stream avm forwards live)
 	} {
@@ -86,6 +87,39 @@ func TestMiseScriptBoundsItsDownloads(t *testing.T) {
 		if strings.HasPrefix(line, "curl ") && !strings.Contains(line, "curl -fL \\") {
 			t.Errorf("mise.sh calls curl directly (%q); use the bounded fetch helper", line)
 		}
+	}
+}
+
+// TestMiseScriptInstallsFromTheCompressedArchive pins the choice of release
+// asset. mise publishes the same binary four ways, and the bare one is by far
+// the largest: ~95 MB against ~22 MB for .tar.xz and ~37 MB for .tar.gz. Phase 2
+// pulled the bare binary, so on a throttled path to GitHub's asset CDN it spent
+// twenty minutes moving bytes with nothing on screen — the compressed archive is
+// the same install for a quarter of the transfer. xz is preferred, gzip is the
+// fallback for an image without it, and the binary is unpacked from mise/bin/mise
+// rather than installed directly.
+func TestMiseScriptInstallsFromTheCompressedArchive(t *testing.T) {
+	b, err := guestScript("mise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"ext=tar.xz",                   // the small asset by default
+		"ext=tar.gz",                   //   with a fallback that needs no xz
+		"command -v xz",                // which of the two is decided at runtime
+		"tar -xf",                      // both are archives now, not a raw binary
+		"/var/tmp/mise/bin/mise",       // the binary inside the archive
+		"failed checksum verification", // a bad resume must not persist
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("mise.sh does not mention %q", want)
+		}
+	}
+	// The checksum is verified against the file that is actually installed, so
+	// the asset name the digest is matched on must be the archive.
+	if strings.Contains(s, `asset="mise-${MISE_VERSION}-linux-${arch}"`) {
+		t.Error("mise.sh still downloads the bare (~95 MB) release binary")
 	}
 }
 
