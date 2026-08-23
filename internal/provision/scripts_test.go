@@ -52,6 +52,43 @@ func TestMiseScriptWiresEveryShellContext(t *testing.T) {
 	}
 }
 
+// TestMiseScriptBoundsItsDownloads guards the fix for a Phase 2 stall that
+// looked exactly like a hang: mise's ~95 MB release binary comes from GitHub's
+// asset CDN, and the bare `curl -fsSL` that fetched it had no timeout, no retry
+// and no output. On a network path that blocks or throttles that CDN, curl waited
+// forever while lima.Provision buffered the guest's stdout, so `avm create`
+// printed "==> Phase 2: mise" and then nothing — no progress, no error, no way to
+// tell a slow download from a dead one. Every download in the script must stay
+// bounded, and the script must say what it is doing on stderr, the stream that
+// reaches the terminal while the phase runs.
+func TestMiseScriptBoundsItsDownloads(t *testing.T) {
+	b, err := guestScript("mise")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"--connect-timeout", // never block on an unreachable host
+		"--speed-limit",     // abort a transfer that stalls mid-flight
+		"--speed-time",      //   (both halves of the stall guard)
+		"--retry",           // a blip must not fail the whole phase
+		"mise: downloading", // stdout is buffered, so say it on stderr
+		">&2",               //   (the stream avm forwards live)
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("mise.sh does not mention %q", want)
+		}
+	}
+	// A silent, unbounded curl is what caused the stall — no download may go back
+	// to one. Every curl call must run through the bounded fetch helper.
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "curl ") && !strings.Contains(line, "curl -fL \\") {
+			t.Errorf("mise.sh calls curl directly (%q); use the bounded fetch helper", line)
+		}
+	}
+}
+
 // miseAwkChecksumProgram extracts the awk program mise.sh uses to pick the
 // matching SHASUMS256.txt line out of the script text itself, so this test
 // exercises the real embedded program rather than a hand-copied stand-in that
