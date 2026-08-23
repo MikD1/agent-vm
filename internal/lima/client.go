@@ -16,10 +16,32 @@ type Client struct{ runner CommandRunner }
 // New builds a Client over the given runner.
 func New(r CommandRunner) *Client { return &Client{runner: r} }
 
+// errTailLines caps how much of limactl's stderr an error repeats. ExecRunner
+// already rendered that stream live through the logFilter, so quoting all of it
+// prints the failure twice: a phase 3 that dies on the last of five tools would
+// otherwise put mise's entire log under the error message, burying the one line
+// that says what went wrong. The tail is where the cause is.
+const errTailLines = 12
+
+// tailLines keeps the last n non-blank lines of s, noting how many it dropped.
+func tailLines(s string, n int) string {
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(s), "\n") {
+		if strings.TrimSpace(l) != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) <= n {
+		return strings.Join(lines, "\n")
+	}
+	return fmt.Sprintf("(%d earlier lines shown above)\n%s",
+		len(lines)-n, strings.Join(lines[len(lines)-n:], "\n"))
+}
+
 func (c *Client) run(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
 	out, errb, err := c.runner.Run(ctx, stdin, args...)
 	if err != nil {
-		return out, fmt.Errorf("limactl %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(errb)))
+		return out, fmt.Errorf("limactl %s: %w: %s", strings.Join(args, " "), err, tailLines(string(errb), errTailLines))
 	}
 	return out, nil
 }

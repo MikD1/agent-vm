@@ -2,6 +2,7 @@ package lima
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -145,4 +146,29 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestTailLines: a failing provisioning phase used to quote its whole guest log
+// back under the error, even though ExecRunner had already streamed it live.
+func TestTailLines(t *testing.T) {
+	if got := tailLines("  boom  ", errTailLines); got != "boom" {
+		t.Errorf("tailLines(short) = %q, want the text unchanged", got)
+	}
+	if got := tailLines("a\n\n\nb", errTailLines); got != "a\nb" {
+		t.Errorf("tailLines() = %q, want blank lines dropped", got)
+	}
+	var long []string
+	for i := 0; i < errTailLines+5; i++ {
+		long = append(long, fmt.Sprintf("line %d", i))
+	}
+	got := tailLines(strings.Join(long, "\n"), errTailLines)
+	if !strings.HasPrefix(got, "(5 earlier lines shown above)\n") {
+		t.Errorf("tailLines() must say how much it dropped; got %q", got)
+	}
+	if !strings.HasSuffix(got, fmt.Sprintf("line %d", errTailLines+4)) {
+		t.Errorf("tailLines() must keep the tail, where the cause is; got %q", got)
+	}
+	if strings.Contains(got, "line 0\n") {
+		t.Errorf("tailLines() kept the head: %q", got)
+	}
 }
