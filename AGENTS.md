@@ -199,8 +199,10 @@ These are **platform scripts**, not per-tool scripts — there is no script per 
 The full phase sequence, driven from `Provisioner.Run` (`internal/provision/provision.go`):
 
 1. **Phase 0** — create + start the VM (Lima).
-2. **Phase 1** — `system.sh`: host CA certs from `$VM_CONFIG/ca-certificates` into the
-   trust store, trust env globally.
+2. **Phase 1** — `system.sh`: host CA certs from `$VM_CONFIG/ca-certificates` (any
+   filename, PEM or DER) into the trust store, trust env globally, then a non-fatal TLS
+   preflight. It reports every certificate it took and every file it rejected on stderr —
+   the only stream `avm` shows live.
 3. **Phase 2** — platform, always installed, never selected by a project: `base.sh`
    (apt packages, sanitized gitconfig), `docker.sh`, `mise.sh` (installs mise itself).
 4. **Phase 3** — tools, in **one** mise invocation: a rendered `mise install` built from
@@ -250,10 +252,15 @@ Do not invent new contract vars and do not read anything outside `$VM_CONFIG`.
 ### Rules for platform scripts
 
 - **Never touch CA certificates** (except `system.sh` itself). Phase 1 installs host CAs
-  and exports trust env (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`,
-  `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`) globally. `base.sh`/`docker.sh`/`mise.sh` (and every
-  mise-installed tool) MUST NOT read `ca-certificates/`, set any `*_CA_*` var, or call
-  `update-ca-certificates`. Trust is inherited transparently.
+  and exports trust env (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`,
+  `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` → the merged system store;
+  `NODE_EXTRA_CA_CERTS` → the host-CA-only bundle, because node *adds* it to its
+  built-in roots) globally, and `provisionWrapper` sources that env into every later
+  phase. `base.sh`/`docker.sh`/`mise.sh` (and every mise-installed tool) MUST NOT read
+  `ca-certificates/`, set any `*_CA_*` var, or call `update-ca-certificates`. Trust is
+  inherited transparently. The replace-the-root-list variables must never point at the
+  host CAs alone: that drops the public roots, and the first host a corporate proxy does
+  not re-sign then fails with the same `UnknownIssuer` a missing CA gives.
 - **Be idempotent** (scripts re-run on `avm recreate`): install-guard with
   `command -v <tool> >/dev/null 2>&1 || { install… }`; edit env files delete-then-append
   per key, not blind append; use `ln -sf` for PATH shims.
