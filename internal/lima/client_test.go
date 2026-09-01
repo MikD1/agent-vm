@@ -172,3 +172,30 @@ func TestTailLines(t *testing.T) {
 		t.Errorf("tailLines() kept the head: %q", got)
 	}
 }
+
+// TestProvisionWrapperSourcesTheTrustEnv pins the one thing that makes the
+// certificate architecture hold across phases. Phase 1 writes the trust env to
+// /etc/profile.d/agent-vm-ca.sh, but every phase reaches the guest as
+// "sudo bash -c": not a login shell, so profile.d is never read, and whether
+// /etc/environment survives sudo is a property of the guest's PAM configuration,
+// not of anything avm sets. Phase 3 — the phase that downloads every tool, and
+// the one that reported "invalid peer certificate: UnknownIssuer" on a network
+// that inspects TLS — is the furthest from the phase that configured trust.
+// Sourcing the file in the wrapper makes the inheritance unconditional.
+func TestProvisionWrapperSourcesTheTrustEnv(t *testing.T) {
+	f := &fakeRunner{}
+	c := New(f)
+	env := map[string]string{"VM_USER": "me", "VM_HOME": "/home/me", "VM_CONFIG": "/mnt/host/vm"}
+	if err := c.Provision(context.Background(), "my-api", []byte("echo hi"), env); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(f.calls[0].args, " ")
+	if !strings.Contains(joined, ". /etc/profile.d/agent-vm-ca.sh") {
+		t.Errorf("wrapper does not source the trust env: %v", f.calls[0].args)
+	}
+	// Phase 1 is the phase that creates the file, so its absence is normal and
+	// must never abort a provisioning step.
+	if !strings.Contains(joined, "[ -r /etc/profile.d/agent-vm-ca.sh ]") {
+		t.Errorf("wrapper sources the trust env unguarded: %v", f.calls[0].args)
+	}
+}

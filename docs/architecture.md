@@ -227,13 +227,13 @@ Two cooperating levels.
 ```mermaid
 graph TB
     subgraph Host
-        hostca["&lt;vm-dir&gt;/ca-certificates/*.pem"]
+        hostca["&lt;vm-dir&gt;/ca-certificates/*<br/><i>any PEM or DER file</i>"]
         baseimg["base.image<br/>(default Ubuntu OR corporate image)"]
     end
 
     subgraph Guest["Guest VM — Phase 1 (system layer)"]
         trust["System trust store<br/>update-ca-certificates"]
-        env["Global env<br/>/etc/environment + /etc/profile.d/*.sh<br/>NODE_EXTRA_CA_CERTS, SSL_CERT_FILE,<br/>REQUESTS_CA_BUNDLE, GIT_SSL_CAINFO, ..."]
+        env["Global env<br/>/etc/environment + /etc/profile.d/*.sh<br/>SSL_CERT_FILE, SSL_CERT_DIR, CURL_CA_BUNDLE,<br/>REQUESTS_CA_BUNDLE, GIT_SSL_CAINFO → merged store<br/>NODE_EXTRA_CA_CERTS → host CAs only"]
     end
 
     subgraph Tools["Phases 2-3 — platform + tools"]
@@ -247,6 +247,37 @@ graph TB
 ```
 
 At the **image level**, `base.image` may point at a pre-built corporate image that already carries its own trust configuration; the tool builds on top of it. At the **provision level**, the Phase 1 system layer always installs host-provided CAs from the VM directory's ca-certificates/ into the system trust store and exports trust env vars globally — both in `/etc/profile.d` (login shells: SSH, VS Code) and `/etc/environment` (non-login shells: `limactl shell`). Every later tool inherits trust with no per-tool code. The tool does not build images; `base.image` consumes an already-prepared image.
+
+Three properties of the system layer are load-bearing, because each of them was
+the difference between a VM that works behind a TLS-inspecting proxy and one
+that fails in Phase 3 with `invalid peer certificate: UnknownIssuer`:
+
+- **Encoding is not the user's problem.** Every regular file in `ca-certificates/`
+  is read, whatever it is called, and PEM and DER are both accepted (a corporate
+  root CA is handed out as a DER-encoded `.crt` at least as often as a `.pem`).
+  Certificates are re-emitted through a normalizer, so a CRLF export or a file
+  with no trailing newline cannot corrupt the bundle it is concatenated into. A
+  file that is not a certificate is named on stderr; a directory of files with no
+  certificate among them fails the phase rather than provisioning a VM that
+  cannot talk to anything.
+- **Trust is added, never substituted.** `SSL_CERT_FILE` and its siblings
+  *replace* a tool's root list. They point at the merged system store
+  (`/etc/ssl/certs/ca-certificates.crt`, rebuilt by `update-ca-certificates` with
+  the host CAs in it), never at the host CAs alone — otherwise the first host the
+  proxy does *not* re-sign fails with the very error a missing CA gives.
+  `NODE_EXTRA_CA_CERTS` is the exception: node *adds* it to its built-in roots,
+  so it gets the host-CA-only bundle.
+- **Inheritance does not depend on PAM.** Phases reach the guest as
+  `sudo bash -c`, which is not a login shell and so never reads `/etc/profile.d`;
+  whether `/etc/environment` survives `sudo` is a property of the guest image's
+  PAM configuration. The provisioning wrapper therefore sources
+  `/etc/profile.d/agent-vm-ca.sh` itself when it exists, so Phase 3 — the phase
+  that downloads every tool — cannot be the one phase running without trust.
+
+The system layer also runs a non-fatal TLS preflight against the two hosts every
+tool comes from (`github.com`, `api.github.com`). A network that inspects TLS
+then fails in Phase 1 with one line that names the cause, instead of in Phase 3
+inside mise's retry loop, after the point where `avm create` rolls the VM back.
 
 ## 7. VM Registry & Lifecycle
 

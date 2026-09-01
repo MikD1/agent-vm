@@ -259,9 +259,36 @@ failure names the URL to measure by hand.
 
 ### Custom CA certificates
 
-Drop PEM root CAs into `<vm-dir>/ca-certificates/`; the Phase 1 system layer
+Drop the root CAs into `<vm-dir>/ca-certificates/`; the Phase 1 system layer
 installs them into the VM trust store and exports the trust env globally, so
-node/git/python/curl all inherit it with no per-tool configuration.
+node/git/python/curl/mise all inherit it with no per-tool configuration.
+
+Any regular file in that folder is read, whatever its extension, and both PEM
+and DER encodings are accepted — a corporate root CA exported from a Windows
+trust store as `corp-root.crt` works as-is. Put the whole chain in if the proxy
+presents one (root plus any subordinate CAs), one file per certificate or several
+in one PEM.
+
+On macOS, a CA already trusted by the host can be exported straight out of the
+keychain:
+
+```bash
+security find-certificate -a -c "<certificate name>" -p \
+  /Library/Keychains/System.keychain > ~/vms/work/ca-certificates/corp-root.pem
+```
+
+Phase 1 says on screen what it found — one `system: trusting …` line per
+certificate with its subject, the installed count, and a warning naming any file
+that was not a certificate. It then checks that TLS to `github.com` and
+`api.github.com` actually verifies, so a network that inspects TLS fails there,
+named, rather than in Phase 3 as `invalid peer certificate: UnknownIssuer`
+against a tool name.
+
+If you see that error from `mise` in Phase 3, the VM does not trust the CA your
+network re-signs with: add it here and run `avm recreate <name>`. Check what the
+VM sees from inside a working VM with `openssl s_client -connect
+api.github.com:443 < /dev/null` — `Verify return code: 0 (ok)` means the trust
+store is right.
 
 ## Security
 

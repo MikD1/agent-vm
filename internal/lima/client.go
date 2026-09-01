@@ -127,8 +127,18 @@ func (c *Client) Delete(ctx context.Context, name string) error {
 // provisionWrapper re-exports the guest env contract from positional args, so no
 // value ever passes through shell quoting. Both provisioning entry points share
 // it: the contract must not drift between them.
+//
+// It also sources the trust env the Phase 1 system layer writes. Every phase
+// arrives as "sudo bash -c", which is not a login shell and so never reads
+// /etc/profile.d, and whether it inherits /etc/environment depends on the
+// guest's PAM configuration rather than on anything avm controls. Phase 3 is the
+// phase that downloads every tool, so the one phase that must not be the one
+// running without the CA configuration is exactly the one furthest from it.
+// Sourcing the file here makes the guarantee unconditional; it does not exist
+// until Phase 1 has written it, hence the readability guard.
 const provisionWrapper = `export VM_USER="$1" VM_HOME="$2" VM_CONFIG="$3"
 export DEBIAN_FRONTEND=noninteractive
+if [ -r /etc/profile.d/agent-vm-ca.sh ]; then . /etc/profile.d/agent-vm-ca.sh; fi
 exec bash -euo pipefail -s`
 
 // provisionArgs builds the limactl argv for one provisioning call. The three

@@ -246,3 +246,197 @@ func TestMiseVersionCoversAquaClaudeFix(t *testing.T) {
 		}
 	}
 }
+
+// systemShellFunc pulls one shell function out of system.sh by name, so a test
+// exercises the function the guest actually runs rather than a copy that can
+// drift from it — the same technique miseAwkChecksumProgram uses for the awk
+// program in mise.sh.
+func systemShellFunc(t *testing.T, script, name string) string {
+	t.Helper()
+	start := strings.Index(script, name+"() {")
+	if start < 0 {
+		t.Fatalf("system.sh: no shell function named %q", name)
+	}
+	end := strings.Index(script[start:], "\n}\n")
+	if end < 0 {
+		t.Fatalf("system.sh: function %q is not closed at column 0", name)
+	}
+	return script[start : start+end+len("\n}\n")]
+}
+
+// TestSystemScriptReadsEveryCertificateEncoding guards the fix for the failure
+// this phase was built to prevent and then walked straight into: a corporate CA
+// that avm never installed, followed by "invalid peer certificate:
+// UnknownIssuer" from mise three phases later, with the VM already rolled back.
+//
+// The phase used to glob *.pem only. A corporate root CA is handed out as a
+// .crt or .cer far more often than as a .pem, and just as often DER-encoded
+// rather than PEM — so the single most likely file a user drops into
+// ca-certificates/ was skipped in silence. PEM exported from a browser or moved
+// through Windows tooling also arrives with CRLF endings and no final newline,
+// which used to concatenate -----END----- and the next -----BEGIN----- onto one
+// line and make every certificate after the first unparseable.
+//
+// This runs the real avm_to_pem out of the embedded script against each of those
+// shapes and feeds the result to OpenSSL, which is the consumer that matters:
+// update-ca-certificates rejects anything it cannot parse.
+func TestSystemScriptReadsEveryCertificateEncoding(t *testing.T) {
+	for _, bin := range []string{"bash", "openssl", "awk"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	b, err := guestScript("system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := systemShellFunc(t, string(b), "avm_to_pem")
+
+	dir := t.TempDir()
+	// Two self-signed certificates, so the chain case has something to chain.
+	var pems []string
+	for i, cn := range []string{"AVM Test Root", "AVM Test Sub"} {
+		out := filepath.Join(dir, "gen"+strconv.Itoa(i)+".pem")
+		cmd := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+			"-keyout", filepath.Join(dir, "key"+strconv.Itoa(i)+".pem"),
+			"-out", out, "-days", "1", "-subj", "/CN="+cn)
+		if o, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("openssl could not generate a fixture certificate: %v\n%s", err, o)
+		}
+		body, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pems = append(pems, string(body))
+	}
+
+	der := filepath.Join(dir, "corp-root.der")
+	if o, err := exec.Command("openssl", "x509", "-in", filepath.Join(dir, "gen0.pem"),
+		"-outform", "der", "-out", der).CombinedOutput(); err != nil {
+		t.Fatalf("openssl der conversion: %v\n%s", err, o)
+	}
+	derBody, err := os.ReadFile(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A PEM as Windows tooling hands it over: CRLF endings, no final newline.
+	crlf := strings.ReplaceAll(strings.TrimRight(pems[0], "\n"), "\n", "\r\n")
+
+	cases := []struct {
+		name  string
+		file  string
+		body  []byte
+		certs int
+	}{
+		{"pem", "corp.pem", []byte(pems[0]), 1},
+		{"der named .crt", "corp.crt", derBody, 1},
+		{"chain", "corp-chain.pem", []byte(pems[0] + pems[1]), 2},
+		{"crlf without trailing newline", "corp-win.crt", []byte(crlf), 1},
+		{"not a certificate", "notes.txt", []byte("just some text\n"), 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := filepath.Join(dir, tc.file)
+			if err := os.WriteFile(src, tc.body, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", fn+"\navm_to_pem \"$1\"\n", "--", src)
+			var out, errb bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &out, &errb
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("avm_to_pem: %v\nstderr: %s", err, errb.String())
+			}
+			got := out.String()
+			if tc.certs == 0 {
+				if got != "" {
+					t.Fatalf("avm_to_pem returned %q for a non-certificate, want nothing", got)
+				}
+				return
+			}
+			if n := strings.Count(got, "-----BEGIN CERTIFICATE-----"); n != tc.certs {
+				t.Fatalf("avm_to_pem emitted %d certificate(s), want %d:\n%s", n, tc.certs, got)
+			}
+			if strings.Contains(got, "\r") {
+				t.Error("avm_to_pem kept CR characters; the bundle must be LF-only")
+			}
+			if !strings.HasSuffix(got, "\n") {
+				t.Error("avm_to_pem output has no trailing newline; concatenation would corrupt the next certificate")
+			}
+			// The consumer's own parser is the only verdict that counts.
+			check := exec.Command("openssl", "storeutl", "-noout", "-certs", "/dev/stdin")
+			check.Stdin = strings.NewReader(got)
+			if o, err := check.CombinedOutput(); err != nil {
+				t.Fatalf("openssl could not parse avm_to_pem output: %v\n%s\n%s", err, o, got)
+			} else if want := "Total found: " + strconv.Itoa(tc.certs); !strings.Contains(string(o), want) {
+				t.Errorf("openssl reported %q, want %q", strings.TrimSpace(string(o)), want)
+			}
+		})
+	}
+}
+
+// TestSystemScriptExtendsTheSystemStore pins the difference between adding trust
+// and replacing it. The phase used to export SSL_CERT_FILE (and CURL_CA_BUNDLE,
+// REQUESTS_CA_BUNDLE, GIT_SSL_CAINFO) pointing at a bundle holding the host CAs
+// and nothing else — those variables replace the root list rather than extend
+// it, so every VM built with a corporate CA lost the public roots. That is
+// invisible while a proxy re-signs everything and fails the moment one host is
+// on its inspection-bypass list, with the same UnknownIssuer a missing CA gives.
+// NODE_EXTRA_CA_CERTS is the exception and must keep the host-only bundle: node
+// adds it to its built-in roots.
+func TestSystemScriptExtendsTheSystemStore(t *testing.T) {
+	b, err := guestScript("system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		`SYSTEM_BUNDLE=/etc/ssl/certs/ca-certificates.crt`, // public roots + ours
+		`TRUST_BUNDLE="$SYSTEM_BUNDLE"`,
+		`export SSL_CERT_FILE="$TRUST_BUNDLE"`,
+		`export CURL_CA_BUNDLE="$TRUST_BUNDLE"`,
+		`export REQUESTS_CA_BUNDLE="$TRUST_BUNDLE"`,
+		`export GIT_SSL_CAINFO="$TRUST_BUNDLE"`,
+		`export SSL_CERT_DIR="/etc/ssl/certs"`,    // rustls-native-certs reads this too
+		`export NODE_EXTRA_CA_CERTS="$CA_BUNDLE"`, // additive: host CAs only
+		`update-ca-certificates`,                  // the merged store is rebuilt first
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("system.sh does not contain %q", want)
+		}
+	}
+	if strings.Contains(s, `export SSL_CERT_FILE="$CA_BUNDLE"`) {
+		t.Error("system.sh still replaces the root list with the host CAs alone")
+	}
+}
+
+// TestSystemScriptReportsWhatItDid keeps the phase from being silent again. avm
+// buffers the guest's stdout and streams only stderr, so anything this phase does
+// not say on stderr is invisible while it runs — and a certificate step that says
+// nothing is indistinguishable from one that found nothing, which is exactly how
+// a skipped corporate CA turned into an unexplained TLS failure in phase 3.
+func TestSystemScriptReportsWhatItDid(t *testing.T) {
+	b, err := guestScript("system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	for _, want := range []string{
+		"system: trusting",                // one line per certificate, with its subject
+		"CA certificate(s) installed",     // the count, so zero is legible
+		"no custom CA certificates",       // the empty case says so out loud
+		"is not a PEM or DER certificate", // a file that is not a certificate is named
+		"cannot verify TLS to",            // the preflight that predicts the phase 3 failure
+		"avm recreate",                    // every message ends in something to do
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("system.sh never says %q", want)
+		}
+	}
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "echo \"system:") && !strings.HasSuffix(trimmed, ">&2") {
+			t.Errorf("system.sh reports on stdout, which avm buffers: %q", trimmed)
+		}
+	}
+}

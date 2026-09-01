@@ -4,8 +4,13 @@ set -euo pipefail
 # Installs mise system-wide and puts its shim directory into every shell context.
 # Contract: MISE_VERSION plus VM_USER, VM_HOME, VM_CONFIG.
 # Certificates are NOT handled here — the Phase 1 system layer already configured
-# trust globally, and mise honors the system store (its default build links
-# native-tls, i.e. OpenSSL, on Linux).
+# trust globally. mise's published Linux tarballs are built with rustls and the
+# platform verifier (--features rustls-native-roots), which loads the OS trust
+# store through rustls-native-certs: it reads SSL_CERT_FILE when that is set and
+# falls back to /etc/ssl/certs otherwise. Phase 1 provides both, so mise sees a
+# corporate CA without knowing anything about certificates. Do not "fix" a TLS
+# failure here by pinning a bundle for mise alone — a tool that needs its own
+# certificate configuration means Phase 1 did not do its job.
 
 export DEBIAN_FRONTEND=noninteractive
 
