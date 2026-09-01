@@ -19,7 +19,7 @@ func TestInstallScriptInstallsLimaWithHomebrewAndAvm(t *testing.T) {
 	root := repoRoot(t)
 	env := newScriptEnv(t, "v1.2.3", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
-	env.writeFakeCurl(false)
+	env.writeFakeCurl(curlServe, curlServe)
 	env.writeFakeBrew()
 
 	out, err := env.run(root)
@@ -44,7 +44,7 @@ func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 	root := repoRoot(t)
 	env := newScriptEnv(t, "v9.8.7", "amd64")
 	env.writeFakeUname("Darwin", "x86_64")
-	env.writeFakeCurl(true)
+	env.writeFakeCurl(curlFail, curlFail)
 	env.writeFakeLimactl()
 	env.extraEnv = append(env.extraEnv, "AVM_VERSION=v9.8.7")
 
@@ -54,8 +54,8 @@ func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 	}
 
 	curlLog := readFile(t, env.curlLog)
-	if strings.Contains(curlLog, "api.github.com") {
-		t.Fatalf("latest release API was called for pinned install:\n%s", curlLog)
+	if strings.Contains(curlLog, "releases/latest") {
+		t.Fatalf("release discovery ran for a pinned install:\n%s", curlLog)
 	}
 
 	installed := filepath.Join(env.installDir, "avm")
@@ -64,11 +64,87 @@ func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 	}
 }
 
+// TestInstallScriptResolvesLatestWithoutTheGitHubAPI covers the network this
+// installer actually has to survive: github.com passes, api.github.com answers
+// 403. That is a corporate proxy blocking the API host, or GitHub rate-limiting
+// a shared egress IP — in both cases the release is public and its assets
+// download fine one host over, but the installer used to ask only the API and
+// die with "failed to resolve latest avm release". The version is discoverable
+// without any API call: /releases/latest redirects to /releases/tag/<version>.
+func TestInstallScriptResolvesLatestWithoutTheGitHubAPI(t *testing.T) {
+	root := repoRoot(t)
+	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env.writeFakeUname("Darwin", "arm64")
+	env.writeFakeCurl(curlServe, curlFail)
+	env.writeFakeLimactl()
+
+	out, err := env.run(root)
+	if err != nil {
+		t.Fatalf("install.sh failed with a blocked API: %v\n%s", err, out)
+	}
+	if got := readFile(t, filepath.Join(env.installDir, "avm")); got != env.binaryContent {
+		t.Fatalf("installed avm content = %q, want %q", got, env.binaryContent)
+	}
+	// The redirect answers the question outright, so the API is never worth a
+	// request — on a network that blocks it, every such request is a stall.
+	if curlLog := readFile(t, env.curlLog); strings.Contains(curlLog, "api.github.com") {
+		t.Fatalf("the API was called even though the redirect resolved:\n%s", curlLog)
+	}
+}
+
+// TestInstallScriptFallsBackToTheAPI is the mirror image: a network that passes
+// the API but not the release pages still installs. The redirect is preferred,
+// not required.
+func TestInstallScriptFallsBackToTheAPI(t *testing.T) {
+	root := repoRoot(t)
+	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env.writeFakeUname("Darwin", "arm64")
+	env.writeFakeCurl(curlFail, curlServe)
+	env.writeFakeLimactl()
+
+	out, err := env.run(root)
+	if err != nil {
+		t.Fatalf("install.sh failed with only the API reachable: %v\n%s", err, out)
+	}
+	if got := readFile(t, filepath.Join(env.installDir, "avm")); got != env.binaryContent {
+		t.Fatalf("installed avm content = %q, want %q", got, env.binaryContent)
+	}
+}
+
+// TestInstallScriptExplainsAFailedReleaseLookup pins the error. Every request in
+// this script runs under curl -f, which prints nothing and returns 22 whatever
+// the server said, so "failed to resolve latest avm release" left the reader with
+// no way to tell a blocked host from a rate limit from a repository with no
+// releases. When both ways are gone the script must report what each host
+// answered and name the way past discovery altogether.
+func TestInstallScriptExplainsAFailedReleaseLookup(t *testing.T) {
+	root := repoRoot(t)
+	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env.writeFakeUname("Darwin", "arm64")
+	env.writeFakeCurl(curlFail, curlFail)
+	env.writeFakeLimactl()
+
+	out, err := env.run(root)
+	if err == nil {
+		t.Fatalf("install.sh succeeded with no reachable release source\n%s", out)
+	}
+	for _, want := range []string{
+		"HTTP 404",     // what github.com answered
+		"HTTP 403",     //   and the API, which is the whole diagnosis
+		"AVM_VERSION=", // the way past release discovery
+		"/releases",    // where to find a tag to pin
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("install.sh output does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestInstallScriptFailsWhenLimaAndHomebrewAreMissing(t *testing.T) {
 	root := repoRoot(t)
 	env := newScriptEnv(t, "v1.2.3", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
-	env.writeFakeCurl(false)
+	env.writeFakeCurl(curlServe, curlServe)
 
 	out, err := env.run(root)
 	if err == nil {
@@ -82,10 +158,21 @@ func TestInstallScriptFailsWhenLimaAndHomebrewAreMissing(t *testing.T) {
 	}
 }
 
+// curlMode says how the fake curl answers one of the two release-discovery
+// endpoints — github.com's /releases/latest redirect and the API — so a test can
+// reproduce a network that reaches one of them and not the other.
+type curlMode string
+
+const (
+	curlServe curlMode = "serve" // answer normally
+	curlFail  curlMode = "fail"  // refuse, the way curl -f exits on a 403
+)
+
 type scriptEnv struct {
 	tempDir       string
 	binDir        string
 	installDir    string
+	version       string
 	archivePath   string
 	checksumsPath string
 	latestPath    string
@@ -101,6 +188,7 @@ func newScriptEnv(t *testing.T, version, arch string) *scriptEnv {
 	tempDir := t.TempDir()
 	env := &scriptEnv{
 		tempDir:       tempDir,
+		version:       version,
 		binDir:        filepath.Join(tempDir, "bin"),
 		installDir:    filepath.Join(tempDir, "install"),
 		brewLog:       filepath.Join(tempDir, "brew.log"),
@@ -127,6 +215,7 @@ func (e *scriptEnv) run(root string) (string, error) {
 		"FAKE_ARCHIVE=" + e.archivePath,
 		"FAKE_CHECKSUMS=" + e.checksumsPath,
 		"FAKE_LATEST_JSON=" + e.latestPath,
+		"FAKE_LATEST_TAG=" + e.version,
 		"FAKE_BREW_LOG=" + e.brewLog,
 		"FAKE_CURL_LOG=" + e.curlLog,
 	}
@@ -152,20 +241,28 @@ esac
 `, osName, arch))
 }
 
-func (e *scriptEnv) writeFakeCurl(failLatest bool) {
-	latestCase := `cat "$FAKE_LATEST_JSON"`
-	if failLatest {
-		latestCase = `printf 'unexpected latest lookup\n' >&2; exit 9`
-	}
+// writeFakeCurl installs a curl that answers the four URLs install.sh fetches.
+// It understands -o and -w with their arguments: release discovery asks for
+// %{url_effective} (where the /releases/latest redirect landed) and, on the
+// failure path, %{http_code}.
+func (e *scriptEnv) writeFakeCurl(redirect, api curlMode) {
+	e.extraEnv = append(e.extraEnv,
+		"FAKE_REDIRECT_MODE="+string(redirect),
+		"FAKE_API_MODE="+string(api))
 
-	writeExecutableFile(filepath.Join(e.binDir, "curl"), fmt.Sprintf(`#!/bin/sh
+	writeExecutableFile(filepath.Join(e.binDir, "curl"), `#!/bin/sh
 set -eu
 out=
 url=
+fmt=
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -o)
       out=$2
+      shift 2
+      ;;
+    -w)
+      fmt=$2
       shift 2
       ;;
     -*)
@@ -177,10 +274,28 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-printf '%%s\n' "$url" >> "$FAKE_CURL_LOG"
+printf '%s\n' "$url" >> "$FAKE_CURL_LOG"
+
+# refuse <status> — a host that answers but not with the release. curl -f exits
+# 22 and prints nothing; only an explicit -w %{http_code} reports the status.
+refuse() {
+  case "$fmt" in
+    *http_code*) printf '%s\n' "$1"; exit 0 ;;
+  esac
+  exit 22
+}
+
 case "$url" in
   *api.github.com*/releases/latest)
-    %s
+    [ "$FAKE_API_MODE" = serve ] || refuse 403
+    cat "$FAKE_LATEST_JSON"
+    ;;
+  https://github.com/*/releases/latest)
+    [ "$FAKE_REDIRECT_MODE" = serve ] || refuse 404
+    case "$fmt" in
+      *url_effective*) printf '%s\n' "${url%/latest}/tag/$FAKE_LATEST_TAG" ;;
+      *http_code*) printf '302\n' ;;
+    esac
     ;;
   */checksums.txt)
     cp "$FAKE_CHECKSUMS" "$out"
@@ -189,11 +304,11 @@ case "$url" in
     cp "$FAKE_ARCHIVE" "$out"
     ;;
   *)
-    printf 'unexpected curl url: %%s\n' "$url" >&2
+    printf 'unexpected curl url: %s\n' "$url" >&2
     exit 22
     ;;
 esac
-`, latestCase))
+`)
 }
 
 func (e *scriptEnv) writeFakeBrew() {
