@@ -24,6 +24,14 @@ release tag:
 curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | AVM_INSTALL_DIR=/usr/local/bin AVM_VERSION=v0.1.0 sh
 ```
 
+The installer finds the latest version through github.com's own
+`/releases/latest` redirect, so it needs no call to `api.github.com` — a host
+corporate proxies often block outright, and one GitHub rate-limits at 60
+requests/hour for an unauthenticated IP. Either produces a `403` on a release
+that is public and downloads fine. The API is still tried as a fallback, and if
+both are unreachable the installer prints what each host answered; pinning
+`AVM_VERSION` skips release discovery altogether.
+
 ### Install from source
 
 For development, or when you already have Go installed:
