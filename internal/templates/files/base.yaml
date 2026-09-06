@@ -3,14 +3,11 @@ minimumLimaVersion: "2.1.0"
 base:
   - template:_images/ubuntu
 
-vmType: "vz"
 arch: "default"
 
 cpus: 4
 memory: "4GiB"
 disk: "120GiB"
-
-mountType: "virtiofs"
 
 ssh:
   loadDotSSHPubKeys: true

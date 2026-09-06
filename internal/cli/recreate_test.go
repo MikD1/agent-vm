@@ -24,7 +24,7 @@ func TestRecreateFromRecord(t *testing.T) {
 	_ = store.Write(rec)
 	r := &okRunner{}
 	deps := createDeps{lima: lima.New(r), store: store}
-	if err := runRecreate(context.Background(), deps, "my-api", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "my-api", hostMacOS, false); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := store.Exists("my-api"); !ok {
@@ -42,7 +42,7 @@ func TestRecreateFromRecord(t *testing.T) {
 func TestRecreateMissingRecord(t *testing.T) {
 	store := registry.NewStore(t.TempDir())
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "ghost", false); err == nil {
+	if err := runRecreate(context.Background(), deps, "ghost", hostMacOS, false); err == nil {
 		t.Error("want error recreating a VM with no record")
 	}
 }
@@ -90,7 +90,7 @@ func TestRecreateDoesNotCallLimaInfo(t *testing.T) {
 	})
 	r := &okRunner{}
 	deps := createDeps{lima: lima.New(r), store: store}
-	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "work", hostMacOS, false); err != nil {
 		t.Fatal(err)
 	}
 	for _, op := range r.ops {
@@ -136,7 +136,7 @@ func TestRecreateRereadsSpec(t *testing.T) {
 		ConfigDir: dir, Home: "/home/me",
 	})
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "work", hostMacOS, false); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Read("work")
@@ -162,7 +162,7 @@ func TestRecreateKeepsRecordCreatedAt(t *testing.T) {
 		ConfigDir: dir, Home: "/home/me",
 	})
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "work", hostMacOS, false); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := store.Read("work")
@@ -182,7 +182,7 @@ func TestRecreateIgnoresSpecName(t *testing.T) {
 		ConfigDir: dir, Home: "/home/me",
 	})
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "work", hostMacOS, false); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := store.Exists("something-else"); ok {
@@ -206,7 +206,7 @@ func TestRecreateFallsBackToRecordWithoutSpec(t *testing.T) {
 		ConfigDir: filepath.Join(t.TempDir(), "gone"), Home: "/home/me",
 	})
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	if err := runRecreate(context.Background(), deps, "work", false); err != nil {
+	if err := runRecreate(context.Background(), deps, "work", hostMacOS, false); err != nil {
 		t.Fatalf("recreate must work without the VM directory: %v", err)
 	}
 	got, _ := store.Read("work")
@@ -224,7 +224,7 @@ func TestRecreateReportsBadSpec(t *testing.T) {
 		Name: "work", User: "me", ConfigDir: dir, Home: "/home/me",
 	})
 	deps := createDeps{lima: lima.New(&okRunner{}), store: store}
-	err := runRecreate(context.Background(), deps, "work", false)
+	err := runRecreate(context.Background(), deps, "work", hostMacOS, false)
 	if err == nil || !strings.Contains(err.Error(), "enormous") {
 		t.Errorf("want the spec's validation error, got %v", err)
 	}

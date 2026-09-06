@@ -17,7 +17,7 @@ import (
 
 func TestInstallScriptInstallsLimaWithHomebrewAndAvm(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlServe, curlServe)
 	env.writeFakeBrew()
@@ -42,7 +42,7 @@ func TestInstallScriptInstallsLimaWithHomebrewAndAvm(t *testing.T) {
 
 func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v9.8.7", "amd64")
+	env := newScriptEnv(t, "v9.8.7", "darwin", "amd64")
 	env.writeFakeUname("Darwin", "x86_64")
 	env.writeFakeCurl(curlFail, curlFail)
 	env.writeFakeLimactl()
@@ -73,7 +73,7 @@ func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 // without any API call: /releases/latest redirects to /releases/tag/<version>.
 func TestInstallScriptResolvesLatestWithoutTheGitHubAPI(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlServe, curlFail)
 	env.writeFakeLimactl()
@@ -97,7 +97,7 @@ func TestInstallScriptResolvesLatestWithoutTheGitHubAPI(t *testing.T) {
 // not required.
 func TestInstallScriptFallsBackToTheAPI(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlFail, curlServe)
 	env.writeFakeLimactl()
@@ -119,7 +119,7 @@ func TestInstallScriptFallsBackToTheAPI(t *testing.T) {
 // answered and name the way past discovery altogether.
 func TestInstallScriptExplainsAFailedReleaseLookup(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlFail, curlFail)
 	env.writeFakeLimactl()
@@ -142,7 +142,7 @@ func TestInstallScriptExplainsAFailedReleaseLookup(t *testing.T) {
 
 func TestInstallScriptFailsWhenLimaAndHomebrewAreMissing(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlServe, curlServe)
 
@@ -168,6 +168,23 @@ const (
 	curlFail  curlMode = "fail"  // refuse, the way curl -f exits on a 403
 )
 
+func TestInstallScriptInstallsLinuxArchive(t *testing.T) {
+	root := repoRoot(t)
+	env := newScriptEnv(t, "v1.2.3", "linux", "amd64")
+	env.writeFakeUname("Linux", "x86_64")
+	env.writeFakeCurl(curlServe, curlServe)
+	env.writeFakeLimactl()
+	writeExecutableFile(filepath.Join(env.binDir, "shasum"), "#!/bin/sh\nexit 99\n")
+
+	out, err := env.run(root)
+	if err != nil {
+		t.Fatalf("install.sh failed: %v\n%s", err, out)
+	}
+	if got := readFile(t, filepath.Join(env.installDir, "avm")); got != env.binaryContent {
+		t.Fatalf("installed avm content = %q, want %q", got, env.binaryContent)
+	}
+}
+
 type scriptEnv struct {
 	tempDir       string
 	binDir        string
@@ -182,7 +199,7 @@ type scriptEnv struct {
 	extraEnv      []string
 }
 
-func newScriptEnv(t *testing.T, version, arch string) *scriptEnv {
+func newScriptEnv(t *testing.T, version, host, arch string) *scriptEnv {
 	t.Helper()
 
 	tempDir := t.TempDir()
@@ -202,7 +219,7 @@ func newScriptEnv(t *testing.T, version, arch string) *scriptEnv {
 	if err := os.WriteFile(env.latestPath, []byte(fmt.Sprintf(`{"tag_name":"%s"}`, version)), 0o644); err != nil {
 		t.Fatalf("write latest json: %v", err)
 	}
-	env.archivePath, env.checksumsPath = writeReleaseFiles(t, tempDir, version, arch, env.binaryContent)
+	env.archivePath, env.checksumsPath = writeReleaseFiles(t, tempDir, version, host, arch, env.binaryContent)
 	return env
 }
 
@@ -300,7 +317,7 @@ case "$url" in
   */checksums.txt)
     cp "$FAKE_CHECKSUMS" "$out"
     ;;
-  */avm_*_darwin_*.tar.gz)
+  */avm_*_*.tar.gz)
     cp "$FAKE_ARCHIVE" "$out"
     ;;
   *)
@@ -324,10 +341,10 @@ exit 0
 `)
 }
 
-func writeReleaseFiles(t *testing.T, dir, version, arch, binaryContent string) (string, string) {
+func writeReleaseFiles(t *testing.T, dir, version, host, arch, binaryContent string) (string, string) {
 	t.Helper()
 
-	archiveName := fmt.Sprintf("avm_%s_darwin_%s.tar.gz", strings.TrimPrefix(version, "v"), arch)
+	archiveName := fmt.Sprintf("avm_%s_%s_%s.tar.gz", strings.TrimPrefix(version, "v"), host, arch)
 	archivePath := filepath.Join(dir, archiveName)
 
 	var buf bytes.Buffer

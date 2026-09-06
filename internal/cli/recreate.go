@@ -93,7 +93,7 @@ func resolveForRecreate(rec registry.Record) (config.Resolved, string, error) {
 // runRecreate reads the Record, re-resolves the config, deletes any existing VM,
 // and rebuilds pristinely. The guest home comes from the Record rather than from
 // `limactl info`: the Record holds the home this VM was actually built with.
-func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool) error {
+func runRecreate(ctx context.Context, deps createDeps, name string, host hostPlatform, verbose bool) error {
 	rec, err := deps.store.Read(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -107,7 +107,7 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 	}
 	fmt.Printf("==> Rebuilding %s from %s\n", name, source)
 
-	limaYAML, err := buildLimaConfig(r, rec.Home)
+	limaYAML, err := buildLimaConfig(r, rec.Home, host)
 	if err != nil {
 		return err
 	}
@@ -149,6 +149,10 @@ func newRecreateCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			host, err := currentHostPlatform()
+			if err != nil {
+				return err
+			}
 			limaClient := newLimaClient(cmd)
 			root, err := registry.DefaultRoot()
 			if err != nil {
@@ -157,7 +161,7 @@ func newRecreateCmd() *cobra.Command {
 			store := registry.NewStore(root)
 			deps := createDeps{lima: limaClient, store: store}
 			verbose, _ := cmd.Flags().GetBool("verbose")
-			return runRecreate(ctx, deps, args[0], verbose)
+			return runRecreate(ctx, deps, args[0], host, verbose)
 		},
 	}
 }

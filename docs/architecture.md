@@ -16,7 +16,7 @@ Three layers plus a host-side state/config store.
 
 ```mermaid
 graph TB
-    subgraph Host["Host (macOS)"]
+    subgraph Host["Host (macOS or Linux)"]
         cli["avm — Go CLI / orchestrator"]
         subgraph Store["~/.config/agent-vm/ (host store)"]
             registry["vms/&lt;name&gt;.yaml<br/><i>VM Records (registry)</i>"]
@@ -412,8 +412,8 @@ The architecture deliberately does not include: building derived/baked images
 from within the tool (`base.image` consumes an already-prepared image instead);
 re-applying modules to a running VM without recreating it (the model is "change
 config → `avm recreate`"); hot-attaching a mount without a restart (Lima
-attaches virtiofs devices at boot); importing externally-created VMs into the
-registry; and non-macOS hosts (Lima/virtiofs assumptions hold).
+attaches filesystem devices at boot); and importing externally-created VMs into the
+registry.
 
 ## 12. Key Decisions
 

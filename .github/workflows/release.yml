@@ -24,7 +24,7 @@ jobs:
       - run: make build
       - run: make shellcheck
 
-      - name: Build macOS archives
+      - name: Build release archives
         shell: bash
         run: |
           set -euo pipefail
@@ -32,12 +32,14 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist
 
-          for arch in arm64 amd64; do
-            package="avm_${version}_darwin_${arch}"
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
+            os=${target%/*}
+            arch=${target#*/}
+            package="avm_${version}_${os}_${arch}"
             package_dir="dist/${package}"
 
             mkdir -p "${package_dir}"
-            GOOS=darwin GOARCH="${arch}" go build -trimpath -ldflags="-s -w" -o "${package_dir}/avm" ./cmd/avm
+            GOOS="${os}" GOARCH="${arch}" go build -trimpath -ldflags="-s -w" -o "${package_dir}/avm" ./cmd/avm
             cp README.md LICENSE "${package_dir}/"
             tar -C "${package_dir}" -czf "dist/${package}.tar.gz" .
           done
@@ -50,5 +52,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/avm_*_darwin_*.tar.gz
+            dist/avm_*.tar.gz
             dist/checksums.txt

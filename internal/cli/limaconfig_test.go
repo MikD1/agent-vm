@@ -29,7 +29,7 @@ func TestBuildLimaConfigBasics(t *testing.T) {
 		ConfigDir: "/Users/me/vms/work",
 		Home:      "/home/me",
 	}
-	out, err := buildLimaConfig(r, "/home/me")
+	out, err := buildLimaConfig(r, "/home/me", hostMacOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestBuildLimaConfigRendersAllMounts(t *testing.T) {
 			{HostPath: "/h/tools/cli", GuestPath: "/home/me/cli"},
 		},
 	}
-	out, err := buildLimaConfig(r, "/home/me")
+	out, err := buildLimaConfig(r, "/home/me", hostMacOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +102,26 @@ func TestBuildLimaConfigRendersAllMounts(t *testing.T) {
 	for _, want := range []string{"/h/shared-lib", "/home/me/shared-lib", "/h/tools/cli", "/home/me/cli"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("lima config missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestBuildLimaConfigLinux(t *testing.T) {
+	r := config.Resolved{
+		Name: "my-api", User: "me",
+		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
+		Base:      config.Base{Image: "template:_images/ubuntu"},
+		ConfigDir: "/h/config",
+		Mounts:    []config.Mount{{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"}},
+	}
+	yamlOut, err := buildLimaConfig(r, "/home/me", hostLinux)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(yamlOut)
+	for _, want := range []string{"vmType: qemu", "mountType: 9p", "/h/my-api"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("Linux Lima config missing %q:\n%s", want, s)
 		}
 	}
 }

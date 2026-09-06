@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/MikD1/agent-vm/internal/config"
 	"github.com/MikD1/agent-vm/internal/provision"
 	"github.com/MikD1/agent-vm/internal/templates"
@@ -29,7 +31,7 @@ func limaMounts(configDir string, mounts []config.Mount) []any {
 
 // buildLimaConfig renders the per-VM Lima YAML from the embedded base template
 // plus the resolved config. guestHome sets the user home path.
-func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
+func buildLimaConfig(r config.Resolved, guestHome string, host hostPlatform) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(templates.BaseLima, &doc); err != nil {
 		return nil, err
@@ -40,6 +42,16 @@ func buildLimaConfig(r config.Resolved, guestHome string) ([]byte, error) {
 	doc["memory"] = r.Resources.Memory
 	doc["disk"] = r.Resources.Disk
 	doc["user"] = map[string]string{"name": r.User, "home": guestHome}
+	switch host {
+	case hostMacOS:
+		doc["vmType"] = "vz"
+		doc["mountType"] = "virtiofs"
+	case hostLinux:
+		doc["vmType"] = "qemu"
+		doc["mountType"] = "9p"
+	default:
+		return nil, fmt.Errorf("unsupported host platform %q", host)
+	}
 	doc["mounts"] = limaMounts(r.ConfigDir, r.Mounts)
 
 	return yaml.Marshal(doc)

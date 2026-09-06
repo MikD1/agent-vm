@@ -24,7 +24,7 @@ type createDeps struct {
 // runCreate performs Record-first creation: refuse on existing Record, write the
 // Record, build the VM, and on any provisioning failure roll the VM back while
 // keeping the Record (→ OrphanedRecord).
-func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHome string, now time.Time, verbose bool) error {
+func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHome string, host hostPlatform, now time.Time, verbose bool) error {
 	exists, err := deps.store.Exists(r.Name)
 	if err != nil {
 		return err
@@ -34,7 +34,7 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 	}
 
 	// Render the Lima config to a temp file.
-	limaYAML, err := buildLimaConfig(r, guestHome)
+	limaYAML, err := buildLimaConfig(r, guestHome, host)
 	if err != nil {
 		return err
 	}
@@ -83,6 +83,10 @@ func newCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			f.ModulesSet = cmd.Flags().Changed("modules")
+			host, err := currentHostPlatform()
+			if err != nil {
+				return err
+			}
 
 			cwd, err := os.Getwd()
 			if err != nil {
@@ -160,7 +164,7 @@ func newCreateCmd() *cobra.Command {
 				lima:  limaClient,
 				store: registry.NewStore(root),
 			}
-			return runCreate(ctx, deps, resolved, home, time.Now(), verbose)
+			return runCreate(ctx, deps, resolved, home, host, time.Now(), verbose)
 		},
 	}
 	cmd.Flags().StringSliceVar(&f.Modules, "modules", nil, "mise tool references, e.g. node@lts,go@1.24")
