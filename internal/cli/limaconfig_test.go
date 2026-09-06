@@ -112,7 +112,7 @@ func TestBuildLimaConfigLinux(t *testing.T) {
 		Resources: config.Resources{CPUs: 4, Memory: "4GiB", Disk: "120GiB"},
 		Base:      config.Base{Image: "template:_images/ubuntu"},
 		ConfigDir: "/h/config",
-		Mounts: []config.Mount{{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"}},
+		Mounts:    []config.Mount{{HostPath: "/h/my-api", GuestPath: "/home/me/my-api"}},
 	}
 	yamlOut, err := buildLimaConfig(r, "/home/me", hostLinux)
 	if err != nil {

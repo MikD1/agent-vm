@@ -73,7 +73,7 @@ func TestInstallScriptUsesPinnedVersionWithoutLatestLookup(t *testing.T) {
 // without any API call: /releases/latest redirects to /releases/tag/<version>.
 func TestInstallScriptResolvesLatestWithoutTheGitHubAPI(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlServe, curlFail)
 	env.writeFakeLimactl()
@@ -97,7 +97,7 @@ func TestInstallScriptResolvesLatestWithoutTheGitHubAPI(t *testing.T) {
 // not required.
 func TestInstallScriptFallsBackToTheAPI(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlFail, curlServe)
 	env.writeFakeLimactl()
@@ -119,7 +119,7 @@ func TestInstallScriptFallsBackToTheAPI(t *testing.T) {
 // answered and name the way past discovery altogether.
 func TestInstallScriptExplainsAFailedReleaseLookup(t *testing.T) {
 	root := repoRoot(t)
-	env := newScriptEnv(t, "v1.2.3", "arm64")
+	env := newScriptEnv(t, "v1.2.3", "darwin", "arm64")
 	env.writeFakeUname("Darwin", "arm64")
 	env.writeFakeCurl(curlFail, curlFail)
 	env.writeFakeLimactl()

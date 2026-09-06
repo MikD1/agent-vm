@@ -9,11 +9,6 @@ cpus: 4
 memory: "4GiB"
 disk: "120GiB"
 
-mounts:
-  - location: "~/.config/agent-vm"
-    mountPoint: "/mnt/host/agent-vm"
-    writable: false
-
 ssh:
   loadDotSSHPubKeys: true
   forwardAgent: false
