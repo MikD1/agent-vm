@@ -12,16 +12,17 @@ curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | sh
 ```
 
 The installer supports macOS. It installs `avm` from the latest GitHub Release
-and checks for Lima, the only runtime dependency. If Lima is missing and
-Homebrew is already installed, the script runs `brew install lima`; if Homebrew
-is also missing, it exits with instructions for installing Homebrew or Lima
-manually. The installer does not install Homebrew itself.
+into `~/.local/bin` by default and checks for `limactl`. Creating a VM requires
+Lima 2.1.0 or newer. If `limactl` is missing and Homebrew is available, the
+installer runs `brew install lima`. Otherwise it gives instructions for
+installing Homebrew or Lima manually.
 
 Set `AVM_INSTALL_DIR` to choose the install directory, or `AVM_VERSION` to pin a
-release tag:
+release tag.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh | AVM_INSTALL_DIR=/usr/local/bin AVM_VERSION=v0.1.0 sh
+curl -fsSL https://raw.githubusercontent.com/MikD1/agent-vm/main/install.sh |
+  AVM_INSTALL_DIR="$HOME/bin" AVM_VERSION=v.0.10 sh
 ```
 
 The installer finds the latest version through github.com's own
@@ -34,7 +35,7 @@ both are unreachable the installer prints what each host answered; pinning
 
 ### Install from source
 
-For development, or when you already have Go installed:
+Use Go 1.26.4 or newer. Run the second command from a local checkout.
 
 ```bash
 go install github.com/MikD1/agent-vm/cmd/avm@latest
@@ -53,6 +54,9 @@ avm create               # create + provision the VM (Record + VM)
 avm shell work           # open a shell in the VM (lands in the guest home)
 ```
 
+Choose a VM name unused in Lima. If Lima returns a creation error, `avm create`
+attempts to delete the instance with that name as part of cleanup.
+
 Each project in `mounts` is mounted read/write at `~/<name>` in the guest; you
 edit on the host and the VM sees the changes. Commit/diff/branch inside the VM;
 push/pull on the host where credentials live.
@@ -67,16 +71,19 @@ avm mount work           # mounts the current folder into the VM named `work`
 avm unmount work web     # detach it again, by guest name or host path
 ```
 
-Both commands update the VM's `agent-vm.yaml`, its Record, and the VM itself.
-Lima attaches folders at boot and will not rewrite a running instance's config,
-so a running VM has to be stopped and started again for the change to take
-effect — `avm mount` asks first. Declining leaves `agent-vm.yaml` and the Record
-updated but the VM as it was; a plain `avm restart` does *not* apply them. To
-apply them later, stop the VM and run the command again, or `avm recreate
-<name>`. Everything inside the guest survives the stop/start.
+Both commands update `agent-vm.yaml` and the Record before syncing the full
+mount list to Lima. For a stopped VM the new mounts take effect on the next
+start. For a running VM both commands ask before stopping, editing, and starting
+it. This stop/start preserves the VM's disk.
 
-A VM's own directory cannot be mounted into it: it is already there, read-only,
-at `/mnt/host/vm`.
+Declining saves the requested change in the Spec and Record only. An ordinary
+`avm restart` uses the existing Lima configuration. Repeating the same mount
+or unmount exits before syncing. The CLI message points to
+`avm recreate <name>`, which applies the saved Spec by rebuilding the VM and
+discarding guest-only state.
+
+The VM directory is already available read-only at `/mnt/host/vm`. Project
+mounts targeting that directory or a directory that contains it are rejected.
 
 Two projects with the same folder name collide at `~/<name>`; pass
 `--name <name>` to place one of them elsewhere.
@@ -87,24 +94,32 @@ Two projects with the same folder name collide at `~/<name>`; pass
 |---------|-------------|
 | `avm init [path]` | Write an `agent-vm.yaml` template. `--force` overwrites. |
 | `avm create [path]` | Create + provision the VM from a VM directory. |
-| `avm recreate <name>` | Pristine rebuild from the VM's current `agent-vm.yaml` (from the record when that folder is not on this host). |
-| `avm list [name]` | List VMs with registry status (managed / orphaned / unmanaged) and Lima runtime state. With a name, show that VM's mounts and tools. |
+| `avm recreate <name>` | Rebuild from the current VM Spec, using Record parameters if the Spec is absent. Required host paths must still be available. Guest-only state is discarded. |
+| `avm list [name]` | List all VMs with registry status and Lima runtime state. With a name, show that VM's recorded mounts and tools. |
 | `avm mount <vm> [path]` | Mount a project folder into a VM. `--name` overrides the guest directory name. |
 | `avm unmount <vm> <path\|name>` | Detach a project folder from a VM. |
-| `avm shell [name]` | Open a shell in the VM, at the guest home (`~`), with each mounted project one `cd` away. |
+| `avm shell [name]` | Open a shell in the VM at the recorded guest home, or let Lima choose when the home is unavailable. |
 | `avm start/stop/restart [name]` | Lifecycle controls. |
 | `avm delete <name>` | Stop + delete the VM and remove its record. `--force` skips confirmation. |
-| `avm prune [name]` | Remove orphaned records (record without a VM). |
+| `avm prune [name]` | Remove a named orphaned Record, or all orphaned Records when the name is omitted. |
 
-`[name]` defaults to the VM whose directory you are in (from `name:` in
-`agent-vm.yaml`, or the folder's basename). `avm mount` and `avm unmount` always
-take the name explicitly: they run from a project folder, not from the VM's.
+Only `shell`, `start`, `stop`, and `restart` infer an omitted name from the
+current directory. These commands use `name:` from its `agent-vm.yaml` or the
+directory's basename when the value is empty or omitted. `mount` and `unmount`
+require the VM name.
 
 ### Global flags
 
 | Flag | Description |
 |------|-------------|
-| `--verbose` | Show the full Lima log. By default only `avm`'s own `==>` progress plus Lima warnings and errors are shown; with `--verbose` every Lima line is shown. Either way the `time=…level=…` prefix and trailing fields are stripped to plain text. Colors honor `NO_COLOR`. |
+| `--verbose` | Include informational and debug lines from Lima's structured stderr and enable verbose mise installation. Warnings, errors, and unstructured guest stderr are shown by default. Structured lines are rendered as plain text and colors honor `NO_COLOR`. The interactive `avm shell` passes the terminal streams directly to Lima. |
+
+### Create flags
+
+`--cpus`, `--memory`, `--disk`, `--base-image`, and `--modules` override
+values from the Spec for that creation. For example, `--modules=node@lts,go@1.24`
+selects the tools to install. A later `avm recreate` with an available Spec
+resolves it again, using built-in defaults for omitted settings.
 
 ## VM config — `agent-vm.yaml`
 
@@ -152,11 +167,15 @@ tool.
 
 ```yaml
 modules:
-  - node: lts        # a pinned alias
-  - go: "1.24"       # a pinned version
+  - node: lts        # track the Node.js LTS alias
+  - go: "1.24"       # track the Go 1.24 series
   - claude           # no version → the latest release
   - python: "3.12"
 ```
+
+Omit `modules` to get `node@lts` and `claude@latest`. Use `modules: []` to
+install only the platform packages. The file generated by `avm init` explicitly
+selects Node LTS, Claude, and Codex.
 
 Tools install system-wide under `/usr/local/share/mise`, and their shim directory
 is on `PATH` in login shells, in the shell `avm shell` opens, and under `sudo`.
@@ -190,9 +209,10 @@ files:
     mode: "0600"
 ```
 
-The destination may be absolute or start with `~/`. `mode` defaults to `0644`;
-set it to `0600` for anything holding credentials. A directory source is copied
-recursively and keeps its own permissions, so `mode` is not allowed on one.
+The destination may be absolute or start with `~/`. For regular files, `mode`
+defaults to `0644`. Set it to `0600` for files holding credentials. Directory
+sources are copied recursively with `cp -R`, so modes of newly created entries
+can be affected by the guest's umask. The `mode` option is only for file sources.
 
 Files are copied at provision time. Edit them and run `avm recreate <name>` to
 apply changes to an existing VM.
@@ -200,17 +220,18 @@ apply changes to an existing VM.
 ## Provisioning scripts
 
 For anything neither a tool nor a file — a database, a service, a corporate
-setup step — list bash scripts in `scripts`. They run last, in order, as root,
-with `VM_USER`, `VM_HOME`, and `VM_CONFIG` set, and a non-zero exit fails
-provisioning.
+setup step — list bash scripts in `scripts`. Each path is absolute on the host
+or relative to the Spec directory. The scripts run in order as root before the
+final restart, with `VM_USER`, `VM_HOME`, and `VM_CONFIG` set. A non-zero exit
+fails provisioning.
 
 ```yaml
 scripts:
   - provision/postgres.sh
 ```
 
-Root's `PATH` carries no mise shims during provisioning, so to use an installed
-tool, drop to the VM user's login shell:
+To make an installed tool write its configuration to the VM user's home, run it
+in that user's login shell.
 
 ```bash
 sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
@@ -224,21 +245,20 @@ sudo -u "$VM_USER" -H bash -lc 'claude plugin install some-plugin'
    only thing that reasons in domain terms.
 2. **Lima** virtualizes: `avm` shells out to `limactl` (a stable CLI contract) to
    create/start/shell/delete VMs.
-3. **Bash provisioning** runs inside the guest in a fixed phase sequence: system
-   layer (certificates, trust) → platform (apt packages, Docker, mise) → tools
-   (one `mise install`) → config files → user scripts → restart. Only the tools
-   phase depends on the project; everything else is the same on every VM.
+3. **Bash provisioning** configures trust and the platform, installs tools,
+   copies config files, runs user scripts, and restarts the guest. Tools, file
+   copies, and user scripts come from the resolved VM configuration.
 
 ### Two config artifacts
 
 - **VM Spec** (`agent-vm.yaml`, in the VM's folder) — portable *intent*: modules,
   resources, mounted projects, files, scripts, optional base image.
-- **VM Record** (`~/.config/agent-vm/vms/<name>.yaml`, host-local) — the tool's
-  *materialization* of one Lima VM (resolved spec + create-time facts). `avm`
-  reconciles the registry against Lima on every `list` and labels each VM
-  **managed**, **orphaned** (record without VM), or **unmanaged** (VM without
-  record). `create` writes the record first; if provisioning fails the VM is rolled
-  back and the record is kept as orphaned, recoverable via `recreate`/`prune`.
+- **VM Record** (host-local, `~/.config/agent-vm/vms/<name>.yaml` by default)
+  captures the resolved Spec and create-time facts. If set, `XDG_CONFIG_HOME`
+  replaces `~/.config`. Each `list` matches entries by name and labels them
+  **managed** (VM and Record), **orphaned** (Record only), or **unmanaged**
+  (VM only). `create` writes the Record first and keeps it if provisioning
+  fails. Cleanup of the Lima VM is attempted separately.
 
 ### Provisioning phases
 
@@ -248,8 +268,8 @@ Phase 1  system layer — install host CA certs into the trust store, export tru
          env globally (tools never touch certificates)
 Phase 2  platform — apt packages, Docker, mise itself; always installed, never
          selected by a project
-Phase 3  tools — one `mise install` for every module in the spec, retried up
-         to three times so a stalled download does not cost the whole VM
+Phase 3  tools — run `mise install` for the full module list as the VM user
+         with up to three attempts total, then create shims and read versions
 Phase 4  config files — copy each `files` entry from the VM directory to its
          guest destination
 Phase 5  user scripts — run each `scripts` entry, in order, as root
@@ -257,16 +277,15 @@ Phase 6  restart — applies group membership (docker) and anything else a live
          session holds
 ```
 
-Each script runs as root with a small env contract: `VM_USER`, `VM_HOME`,
-`VM_CONFIG` (`/mnt/host/vm`, the VM directory, read-only).
+The provisioning wrapper starts each phase as root and sets `VM_USER`,
+`VM_HOME`, and `VM_CONFIG` (`/mnt/host/vm`, the read-only VM directory).
+Phase 3 runs mise as `VM_USER`.
 
-A phase is quiet while it runs: `avm` buffers the guest's stdout and streams only
-its stderr. Phase 2 downloads mise from GitHub's release CDN — a host none of the
-earlier phases touch — so a network path that blocks or throttles it fails there
-and nowhere else. That download takes the compressed archive (~22 MB, not the
-~95 MB bare binary), is bounded (connect timeout, stall guard, retries), resumes
-a partial file instead of restarting it, and prints its progress every 20s. A
-failure names the URL to measure by hand.
+`avm` buffers the guest's stdout and streams its stderr. When installing mise
+itself in Phase 2, it downloads a compressed release from GitHub's release CDN
+with connection and stall limits and retry support. The download can resume a
+partial file and reports progress about every 20 seconds. A failure names the
+download URL.
 
 ### Custom CA certificates
 
@@ -274,35 +293,39 @@ Drop the root CAs into `<vm-dir>/ca-certificates/`; the Phase 1 system layer
 installs them into the VM trust store and exports the trust env globally, so
 node/git/python/curl/mise all inherit it with no per-tool configuration.
 
-Any regular file in that folder is read, whatever its extension, and both PEM
-and DER encodings are accepted — a corporate root CA exported from a Windows
-trust store as `corp-root.crt` works as-is. Put the whole chain in if the proxy
-presents one (root plus any subordinate CAs), one file per certificate or several
-in one PEM.
+Phase 1 skips hidden files and files ending in `.md`. It accepts PEM and DER
+regardless of the filename extension. A corporate root CA exported from a
+Windows trust store as `corp-root.crt` works as-is. Put the whole chain in if the
+proxy presents one (root plus any subordinate CAs), one file per certificate or
+several in one PEM.
 
 On macOS, a CA already trusted by the host can be exported straight out of the
 keychain:
 
 ```bash
+mkdir -p ~/vms/work/ca-certificates
 security find-certificate -a -c "<certificate name>" -p \
   /Library/Keychains/System.keychain > ~/vms/work/ca-certificates/corp-root.pem
 ```
 
-Phase 1 says on screen what it found — one `system: trusting …` line per
-certificate with its subject, the installed count, and a warning naming any file
-that was not a certificate. It then checks that TLS to `github.com` and
-`api.github.com` actually verifies, so a network that inspects TLS fails there,
-named, rather than in Phase 3 as `invalid peer certificate: UnknownIssuer`
-against a tool name.
+Phase 1 prints one `system: trusting …` line per accepted input file with the
+first certificate's subject when available. It also prints the file count and
+warns about rejected candidates. When `curl` is available, it tries HTTPS
+requests to `github.com` and `api.github.com`. Failures warn and provisioning
+continues.
 
-If you see that error from `mise` in Phase 3, the VM does not trust the CA your
-network re-signs with: add it here and run `avm recreate <name>`. Check what the
-VM sees from inside a working VM with `openssl s_client -connect
-api.github.com:443 < /dev/null` — `Verify return code: 0 (ok)` means the trust
-store is right.
+If Phase 3 reports `invalid peer certificate: UnknownIssuer` on a
+TLS-inspecting network, check whether the VM trusts the CA your network uses
+to sign certificates. From a working guest, check verification for a
+specific host with `openssl s_client -connect api.github.com:443
+-verify_hostname api.github.com -verify_return_error < /dev/null`.
+Add the required CAs to the VM directory and rebuild to apply them.
 
 ## Security
 
 - Each domain of work is isolated in its own VM.
-- The VM directory is mounted read-only; the guest cannot write back to it.
-- Git credentials stay on the host — they never leave it.
+- The service mount at `/mnt/host/vm` is read-only. Entries in `mounts` are
+  read/write.
+- Push and pull from the host to keep Git credentials there. The base phase
+  strips credential sections from the provided `.gitconfig`. Entries in
+  `files` explicitly copy their contents into the guest.

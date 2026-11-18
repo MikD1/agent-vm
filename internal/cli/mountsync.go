@@ -9,16 +9,12 @@ import (
 )
 
 // syncMounts converges the Lima instance onto the Record's mount list. Lima
-// attaches virtiofs devices at boot, so there is no incremental "add one mount"
-// path: the whole list is rewritten from the Record. One primitive therefore
-// serves mount, unmount, and a hand-edited config alike.
+// attaches virtiofs devices at boot, so both mount and unmount rewrite the
+// whole list from the Record.
 //
-// `limactl edit` also refuses to touch a running instance, so the config can
-// only be rewritten while the VM is stopped. A stopped VM is edited in place; a
-// running one goes prompt → stop → edit → start, and declining leaves Lima
-// untouched (an edit would only fail, and there is nothing a live guest could
-// pick up from it). If the edit fails mid-sequence the VM is left stopped, which
-// the caller's error reports.
+// After checking the VM's state, edit a stopped VM in place or ask for
+// confirmation before stopping, editing, and starting a running VM. On
+// decline, the state check is the only Lima operation.
 //
 // verb is "attach" or "detach" — the only thing that differs between the two
 // commands is what the prompt says.
@@ -53,14 +49,13 @@ func syncMounts(ctx context.Context, deps createDeps, rec registry.Record, verb 
 		return deps.lima.EditMounts(ctx, rec.Name, expr)
 	}
 
-	// `limactl edit` refuses to run against a running instance, so the prompt
-	// comes before any Lima call: there is nothing useful to do on decline, and
-	// attempting the edit anyway would just fail.
 	fmt.Printf("The VM must stop to %s it. Stop and restart it now? [y/N] ", verb)
 	var reply string
 	fmt.Scanln(&reply)
 	if reply != "y" && reply != "Y" {
-		fmt.Printf("Declined. The change is recorded in agent-vm.yaml and the record but is not applied to the VM — a plain `avm restart` will not pick it up. Stop the VM (`avm stop %s`) and run the same command again, or `avm recreate %s` to rebuild it with the current mounts.\n", rec.Name, rec.Name)
+		fmt.Println("Declined. The mount change was saved to agent-vm.yaml and the record.")
+		fmt.Println("An ordinary `avm restart` uses the existing Lima configuration. Repeating this command skips synchronization.")
+		fmt.Printf("`avm recreate %s` applies the saved mounts by rebuilding the VM. Rebuilding deletes data stored only inside the VM.\n", rec.Name)
 		return nil
 	}
 	fmt.Printf("==> Stopping VM: %s\n", rec.Name)

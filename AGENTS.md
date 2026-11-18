@@ -27,13 +27,13 @@ certificates, provisioning scripts.
 - **Direct deps:** `github.com/spf13/cobra` (CLI), `gopkg.in/yaml.v3` (config). Keep the
   dependency set minimal — Lima is the only intended *runtime* dependency.
 - **License:** MIT. Do not add license headers to source files.
-- **Platform:** macOS host only (Lima/virtiofs assumptions). Do not "port" it.
+- **Platform:** macOS host with Lima 2.1.0 or newer. Keep the Lima and virtiofs assumptions.
 
 ### The three-layer model (memorize this)
 
 ```
 Go CLI (internal/*)  →  shells out to `limactl`  →  bash scripts provision the guest
-   orchestrates             virtualizes                 install tools as root
+   orchestrates             virtualizes                 set up platform and tools
 ```
 
 Each layer talks to the next through a narrow, stable interface. Most bugs and bad PRs
@@ -43,9 +43,9 @@ come from blurring these boundaries — don't.
 
 ## 2. Setup, build, test, lint
 
-The [`Makefile`](Makefile) is the source of truth for commands. In this environment Go
-1.26.4 and **shellcheck 0.10.0** are installed; `limactl` is **not** needed to build or
-test (the Lima layer is faked in tests — see §6).
+The [`Makefile`](Makefile) is the source of truth for commands. Use the Go toolchain
+version in `go.mod` and make ShellCheck available on `PATH` for shell lint. Builds
+and tests run without Lima. See §6 for the Lima test fakes.
 
 | Task | Command | Notes |
 |------|---------|-------|
@@ -57,15 +57,14 @@ test (the Lima layer is faked in tests — see §6).
 | Vet | `make vet` (`go vet ./...`) | |
 | Format | `make fmt` (`gofmt -w cmd internal`) | Rewrites in place. |
 | Check formatting | `make fmt-check` | Fails, listing the offending files, if `gofmt -l cmd internal` is non-empty. |
-| Shellcheck guest scripts | `make shellcheck` | `shellcheck internal/provision/scripts/*.sh`. |
+| Shellcheck installer and guest scripts | `make shellcheck` | `shellcheck install.sh internal/provision/scripts/*.sh`. |
 | Lint (fmt-check + vet + shellcheck) | `make lint` | |
 | **Default gate** | `make all` | Runs **fmt-check → vet → test → build only**. |
 
 ### Critical tooling facts
 
-- **`make all` does NOT run shellcheck.** It is `fmt-check → vet → test → build`. If you
-  edit any `internal/provision/scripts/*.sh`, you must additionally run `make shellcheck`
-  (or `make lint`).
+- **`make all`** runs `fmt-check → vet → test → build`. Run `make shellcheck`
+  (or `make lint`) as well when editing `install.sh` or a guest script.
 - **CI runs the same targets** (`.github/workflows/ci.yml`: `make fmt-check`, `make vet`,
   `make build`, `make test`, plus `make shellcheck` in its own job; `release.yml` runs all
   of them). There is no `CONTRIBUTING.md`. CI is a second net, not a substitute: run the
@@ -87,7 +86,7 @@ internal/
   cli/        cobra commands (one file per command) — the only package that wires everything
   config/     VM Spec schema, defaults, validation, flags>spec>defaults resolution
   specedit/   comment-preserving edits to agent-vm.yaml (yaml.Node, not re-marshal)
-  registry/   VM Records (host store ~/.config/agent-vm/vms/) + Lima reconciliation
+  registry/   VM Records (default ~/.config/agent-vm/vms/) + Lima reconciliation
   lima/       limactl wrapper — the ONLY package that shells out to limactl
   provision/  phase planner + go:embed of scripts/*.sh — drives the bash phases via lima;
               the ONLY package that knows the platform-script layout. Per-tool
@@ -176,9 +175,9 @@ new "absent vs explicit" flag.
   `os.Exit` inside command handlers.
 - Each command is a `newXxxCmd() *cobra.Command` factory (one per file, except the
   lifecycle verbs `shell`/`start`/`stop`/`restart` which share `internal/cli/lifecycle.go`),
-  using **`RunE`** (never `Run`) so errors propagate. Build the Lima client inside `RunE` via
-  `newLimaClient(cmd)` (honors the persistent `--verbose` flag); get `ctx` from
-  `cmd.Context()`.
+  using **`RunE`** so errors propagate. Commands that need Lima build the client
+  inside `RunE` via `newLimaClient(cmd)`, which honors the persistent `--verbose`
+  flag. Get `ctx` from `cmd.Context()`.
 - **Keep logic out of the closure:** `RunE` parses flags/derives inputs, then calls a
   testable plain function (`runCreate`, `runList`, `runDelete`, …) that takes injected
   dependencies. This is what makes the command unit-testable without a real `limactl`.
@@ -199,16 +198,18 @@ These are **platform scripts**, not per-tool scripts — there is no script per 
 The full phase sequence, driven from `Provisioner.Run` (`internal/provision/provision.go`):
 
 1. **Phase 0** — create + start the VM (Lima).
-2. **Phase 1** — `system.sh`: host CA certs from `$VM_CONFIG/ca-certificates` (any
-   filename, PEM or DER) into the trust store, trust env globally, then a non-fatal TLS
-   preflight. It reports every certificate it took and every file it rejected on stderr —
-   the only stream `avm` shows live.
-3. **Phase 2** — platform, always installed, never selected by a project: `base.sh`
+2. **Phase 1** runs `system.sh` to pick up PEM and DER CA files from
+   `$VM_CONFIG/ca-certificates` and export trust settings. It skips hidden and
+   `.md` files and reports accepted and rejected candidates on stderr. HTTPS
+   preflight failures produce warnings when `curl` is available.
+3. **Phase 2** always installs the platform using `base.sh`
    (apt packages, sanitized gitconfig), `docker.sh`, `mise.sh` (installs mise itself).
-4. **Phase 3** — tools, in **one** mise invocation: a rendered `mise install` built from
-   the resolved config's `Modules []config.ModuleSpec`, followed by `mise ls -i -J` to
-   read back what mise actually resolved (for the Record's `installedTools`; see §4's
-   `guestScript` note — this is Go-rendered, not an embedded script).
+4. **Phase 3** writes the system mise config, sets `minimum_release_age = "0s"`,
+   and assigns the data directory to `VM_USER`. Each of up to three attempts
+   runs one generated `mise install` for the full resolved module list as the VM
+   user. The same user runs `mise reshim` and `mise ls -i -J` to create shims and
+   read versions for the Record's `installedTools`. A read-back failure warns
+   and provisioning continues.
 5. **Phase 4** — config files: copy each `files` entry from `$VM_CONFIG` to its destination.
 6. **Phase 5** — user scripts, in spec order (arbitrary bash a project supplies via
    `scripts:` in `agent-vm.yaml` — not to be confused with the embedded platform
@@ -243,24 +244,26 @@ redundant (about half the existing scripts include it for clarity; both styles a
 
 | Variable | Value | Use |
 |----------|-------|-----|
-| `VM_USER` | unprivileged guest user | `sudo -u "$VM_USER" -H …`, `usermod` |
+| `VM_USER` | unprivileged guest user | `runuser`, `sudo -u "$VM_USER" -H …`, `usermod` |
 | `VM_HOME` | the guest home | the root every project mounts under |
 | `VM_CONFIG` | `/mnt/host/vm` (**read-only** virtiofs) | the VM directory: `files` sources, `ca-certificates/`, and the sanitized `.gitconfig` `base.sh` reads |
 
-Do not invent new contract vars and do not read anything outside `$VM_CONFIG`.
+Keep VM directory inputs under `$VM_CONFIG` in the guest. The CLI reads the
+configured project scripts on the host and streams them over stdin. Keep the
+three-variable interface for passing VM paths and user information.
 
 ### Rules for platform scripts
 
-- **Never touch CA certificates** (except `system.sh` itself). Phase 1 installs host CAs
-  and exports trust env (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `REQUESTS_CA_BUNDLE`,
-  `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE` → the merged system store;
-  `NODE_EXTRA_CA_CERTS` → the host-CA-only bundle, because node *adds* it to its
-  built-in roots) globally, and `provisionWrapper` sources that env into every later
-  phase. `base.sh`/`docker.sh`/`mise.sh` (and every mise-installed tool) MUST NOT read
-  `ca-certificates/`, set any `*_CA_*` var, or call `update-ca-certificates`. Trust is
-  inherited transparently. The replace-the-root-list variables must never point at the
-  host CAs alone: that drops the public roots, and the first host a corporate proxy does
-  not re-sign then fails with the same `UnknownIssuer` a missing CA gives.
+- **Keep certificate management in `system.sh`.** Phase 1 installs host CAs and
+  publishes trust settings. `provisionWrapper` sources them when present, and
+  `runuser` preserves them for mise. Later platform phases and tools inherit
+  these settings. Keep CA installation, `ca-certificates/` reads, and trust
+  variable assignments centralized.
+  Use the merged system bundle for variables that replace the roots so public
+  roots stay trusted. Phase 1 currently falls back to the host-only bundle when
+  the merged bundle is absent or empty. `SSL_CERT_DIR` points to
+  `/etc/ssl/certs`, and `NODE_EXTRA_CA_CERTS` points to the host-only bundle
+  because Node adds those certificates to its built-in roots.
 - **Be idempotent** (scripts re-run on `avm recreate`): install-guard with
   `command -v <tool> >/dev/null 2>&1 || { install… }`; edit env files delete-then-append
   per key, not blind append; use `ln -sf` for PATH shims.
@@ -362,10 +365,10 @@ Canonical small examples: `internal/cli/list.go`, `internal/cli/delete.go`.
 1. Create `internal/cli/<name>.go` with **two functions**: a testable core
    `run<Name>(ctx, c *lima.Client, store *registry.Store, …)` holding the logic with
    injected deps; and `new<Name>Cmd() *cobra.Command` wiring `Use`/`Short`/`Args`/`RunE`
-   and obtaining deps inside `RunE`. For VM-targeting commands, resolve the name with
-   `resolveTargetName(arg, cwd())` (explicit arg > basename of the cwd that contains an
-   `agent-vm.yaml` > error).
-   Lifecycle-style verbs can reuse the `lifecycleCmd` helper.
+   and obtaining deps inside `RunE`. To follow the shell and lifecycle target
+   rule, use `resolveTargetName(arg, cwd())`. It prefers the explicit argument
+   and otherwise resolves the current directory's Spec name or basename. Use
+   `lifecycleCmd` for commands with the same lifecycle argument handling.
 2. **Register it** in `internal/cli/root.go` with `root.AddCommand(new<Name>Cmd())`.
    *(This is silent if omitted — the package compiles and tests pass while the command is
    simply absent from the binary.)*
@@ -387,9 +390,9 @@ written into the `Record` and/or the Lima config. Touch each stage:
    field (+ `*Set bool` if absent-vs-empty matters) if it should be CLI-overridable.
 4. `internal/cli/create.go` — register the cobra flag and, for absent-vs-set semantics,
    set `f.<Field>Set = cmd.Flags().Changed("<flag>")`.
-5. **`internal/registry/record.go` — if the field must persist for `recreate`/`list`,
-   add it to `Record` and map it in `FromResolved`.** This is the most-missed step: skip
-   it and the field resolves on create but is silently lost on `avm recreate`.
+5. **`internal/registry/record.go`** holds the fields that persist in the registry.
+   Map them in `FromResolved`. If a field also participates in the Record
+   fallback for `recreate`, map it back in `recordToResolved`.
 6. `internal/cli/limaconfig.go` — if the field changes the VM itself, wire it into
    `buildLimaConfig`.
 7. `internal/templates/files/agent-vm.yaml` — surface it (often commented) for `avm init`.
@@ -434,9 +437,8 @@ Remote is `https://github.com/MikD1/agent-vm.git`; default branch is `main`.
 3. Run the gates (below) and confirm they pass.
 4. Commit with a Conventional-Commit subject.
 5. `git push -u origin <branch>`.
-6. Open the PR against `main`. **`gh` is not installed here** — either install it and run
-   `gh pr create --base main --fill`, or push and open the PR via the GitHub web UI. The
-   PR title follows the same `type(scope): subject` convention.
+6. Open the PR against `main` with `gh pr create --base main --fill` or use the
+   GitHub web UI. Use the same `type(scope): subject` convention for the PR title.
 
 ### Pre-PR checklist (copy-paste)
 
@@ -444,8 +446,7 @@ Remote is `https://github.com/MikD1/agent-vm.git`; default branch is `main`.
 # 1. Go gate: fmt-check + vet + test + build
 make all
 
-# 2. Shell lint — ONLY if you touched internal/provision/scripts/*.sh
-#    (make all does NOT run shellcheck)
+# 2. Shell lint if you touched install.sh or a guest script
 make shellcheck
 
 # 3. If step 1 failed on fmt-check, format and re-run it
@@ -465,11 +466,13 @@ git log --oneline origin/main..HEAD
 
 ## 9. Security & isolation notes
 
-- Each domain of work runs in its own VM; the VM's own directory is mounted
-  **read-only** at `/mnt/host/vm`, and it is the only host folder the guest reads
-  besides the projects in `mounts`.
-- Git credentials stay on the host: commit/diff/branch happen inside the VM, push/pull
-  on the host — no keys or tokens are copied into the guest.
+- Each domain of work runs in its own VM. The generated Lima configuration
+  mounts the VM directory **read-only** at `/mnt/host/vm` and project folders
+  read/write.
+- Commit, diff, and branch inside the VM. Push and pull on the host where the
+  Git credentials live. The base phase strips credential sections from the
+  supplied `.gitconfig`. Entries in `files` explicitly copy their contents to
+  the guest.
 - The certificate model is centralized in Phase 1 (`system.sh`); modules stay unaware of
   trust (§5). Don't reintroduce per-module cert handling.
 

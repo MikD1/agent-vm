@@ -230,6 +230,43 @@ func TestMountRunningVMDeclineTouchesNoLima(t *testing.T) {
 	}
 }
 
+func TestSyncMountsDeclineGuidance(t *testing.T) {
+	for _, verb := range []string{"attach", "detach"} {
+		t.Run(verb, func(t *testing.T) {
+			withStdin(t, "\n")
+			out, err := os.CreateTemp(t.TempDir(), "stdout")
+			if err != nil {
+				t.Fatal(err)
+			}
+			orig := os.Stdout
+			os.Stdout = out
+			t.Cleanup(func() { os.Stdout = orig; _ = out.Close() })
+
+			deps := createDeps{lima: lima.New(&stateRunner{state: "running"})}
+			if err := syncMounts(context.Background(), deps, record(t.TempDir()), verb); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(out.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"saved to agent-vm.yaml and the record",
+				"Repeating this command skips synchronization",
+				"`avm recreate work`",
+				"deletes data stored only inside the VM",
+			} {
+				if !strings.Contains(string(got), want) {
+					t.Errorf("output = %q, want it to include %q", got, want)
+				}
+			}
+			if strings.Contains(string(got), "`avm stop") {
+				t.Errorf("output recommends stopping the VM to retry the command: %q", got)
+			}
+		})
+	}
+}
+
 // TestMountRunningVMAcceptStopsThenEdits pins the only order real Lima accepts:
 // stop, then edit, then start. The fake rejects an edit while its state is
 // "running", so this also proves no edit is attempted before the stop.
