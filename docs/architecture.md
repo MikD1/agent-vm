@@ -194,7 +194,7 @@ sequenceDiagram
     Note over Guest: base packages, Docker, mise itself — always installed, never selected by a project
 
     CLI->>Guest: Phase 3 — tools (sudo bash -s)
-    Note over Guest: one rendered `mise install` for every module in the spec,<br/>retried up to three times (mise skips what is installed);<br/>`mise ls -i -J` reports back the resolved versions
+    Note over Guest: one rendered `mise install` as the VM user for all spec modules,<br/>retried up to three times (mise skips what is installed);<br/>`mise ls -i -J` reports back the resolved versions
 
     CLI->>Guest: Phase 4 — config files (sudo bash -s)
     Note over Guest: copy each `files` entry from /mnt/host/vm to its guest destination
@@ -207,6 +207,12 @@ sequenceDiagram
 ```
 
 Phases 1 and 4–5 isolate the cross-cutting and project-supplied concerns; phase 3 is the only one that depends on the project's tool selection. The planner owns ordering and per-phase status across the whole sequence, and the restart is unconditional because any provisioned VM may have changed group membership or global env.
+
+Phase 3 writes `/etc/mise/config.toml` as root and assigns `/usr/local/share/mise`
+to the VM user. Installation, shim creation, and version read-back run as that
+user with the trust environment from Phase 1. This lets the VM user upgrade tools
+in place. The system mise config sets `minimum_release_age = "0s"`, so versions
+within the configured ranges are eligible as soon as mise sees them.
 
 ## 5. Guest Env Contract
 

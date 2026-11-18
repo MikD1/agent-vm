@@ -94,7 +94,7 @@ func (p *Provisioner) Run(ctx context.Context, r config.Resolved, limaConfigPath
 	// itself ("a failure here leaves a working VM with a slightly stale Record,
 	// which is not worth rolling back").
 	listed, err := p.lima.ProvisionOutput(ctx, r.Name,
-		[]byte("export MISE_DATA_DIR="+miseDataDir+"\nmise ls -i -J\n"), p.env(r))
+		[]byte(miseDataEnv+miseAsVMUser+" ls -i -J\n"), p.env(r))
 	if err != nil {
 		fmt.Printf("Warning: could not read back installed tool versions: %v\n", err)
 	} else if p.installed, err = parseMiseList(listed); err != nil {

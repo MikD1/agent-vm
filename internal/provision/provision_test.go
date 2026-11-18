@@ -57,6 +57,25 @@ func TestPlanPhaseOrder(t *testing.T) {
 	}
 }
 
+func TestPlanReadsMiseVersionsAsVMUser(t *testing.T) {
+	rec := &recorder{}
+	p := New(lima.New(rec), false)
+	if err := p.Run(context.Background(), baseResolved(), "/tmp/cfg.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	for _, script := range rec.stdin {
+		if strings.Contains(script, "mise ls -i -J") {
+			want := "export MISE_DATA_DIR=/usr/local/share/mise\n" +
+				`runuser -u "$VM_USER" -- mise ls -i -J` + "\n"
+			if script != want {
+				t.Errorf("mise read-back script = %q, want %q", script, want)
+			}
+			return
+		}
+	}
+	t.Error("no mise read-back ran")
+}
+
 func TestPlanRestartsWithoutDocker(t *testing.T) {
 	// Docker is platform, not a module: the restart no longer depends on modules.
 	rec := &recorder{}
@@ -192,19 +211,26 @@ func TestPlanSurvivesBrokenMiseListReadback(t *testing.T) {
 
 func TestRenderMiseInstall(t *testing.T) {
 	got := string(renderMiseInstall([]config.ModuleSpec{{Name: "node", Version: "lts"}}, false))
+	const userMise = `runuser -u "$VM_USER" -- mise`
 	for _, want := range []string{
 		"export MISE_DATA_DIR=" + miseDataDir,
 		"install -d -m 0755 /etc/mise",
 		miseConfigPath,
 		`"node" = "lts"`,
-		"if mise install -y; then",
-		"mise reshim",
+		`install -d -m 0755 "$MISE_DATA_DIR"`,
+		`chown -hR -- "$VM_USER" "$MISE_DATA_DIR"`,
+		"if " + userMise + " install -y; then",
+		userMise + " ls -i >&2 || true",
+		userMise + " reshim",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("renderMiseInstall() does not contain %q:\n%s", want, got)
 		}
 	}
-	if v := string(renderMiseInstall(nil, true)); !strings.Contains(v, "mise install -y --verbose") {
+	if strings.Index(got, "chown -hR") > strings.Index(got, userMise+" install") {
+		t.Error("mise data directory must be writable before installing tools")
+	}
+	if v := string(renderMiseInstall(nil, true)); !strings.Contains(v, userMise+" install -y --verbose") {
 		t.Errorf("verbose install missing --verbose:\n%s", v)
 	}
 }

@@ -160,7 +160,10 @@ modules:
 
 Tools install system-wide under `/usr/local/share/mise`, and their shim directory
 is on `PATH` in login shells, in the shell `avm shell` opens, and under `sudo`.
-`avm` records the versions mise actually resolved in the VM Record.
+The VM user owns the tool directory and can run `mise upgrade <tool>` inside the
+VM without `sudo`. New releases are eligible immediately within the configured
+version range. `avm` records the versions mise resolved during provisioning in
+the VM Record.
 
 Every VM also gets, without being asked: the host CA certificates in the system
 trust store, a sanitized `.gitconfig`, `git`, `curl`, `jq`, `ripgrep`, `fd`,
