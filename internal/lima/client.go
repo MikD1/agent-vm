@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -96,6 +97,26 @@ func normalizeState(state string) string {
 // InfoRaw returns the raw JSON from `limactl info` for the caller to parse.
 func (c *Client) InfoRaw(ctx context.Context) ([]byte, error) {
 	return c.run(ctx, nil, "info")
+}
+
+// SSHConfigPath returns the absolute path to the instance's Lima SSH config.
+func (c *Client) SSHConfigPath(ctx context.Context, name string) (string, error) {
+	out, err := c.run(ctx, nil, "list", "--format", "{{.SSHConfigFile}}", name)
+	if err != nil {
+		return "", err
+	}
+	path := strings.TrimSuffix(string(out), "\n")
+	if path == "" || strings.ContainsAny(path, "\x00\r\n") {
+		return "", fmt.Errorf("invalid SSH config path for %q: %q", name, path)
+	}
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	abs, err := filepath.Abs(path) // limactl runs in the same directory as avm
+	if err != nil {
+		return "", fmt.Errorf("resolve SSH config path for %q: %w", name, err)
+	}
+	return abs, nil
 }
 
 func (c *Client) Create(ctx context.Context, name, configPath string) error {

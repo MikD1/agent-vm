@@ -9,12 +9,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runDelete stops+deletes the VM and removes its Record.
-func runDelete(ctx context.Context, c *lima.Client, store *registry.Store, name string) error {
+// runDelete stops+deletes the VM and removes its SSH include and Record.
+func runDelete(ctx context.Context, c *lima.Client, store *registry.Store, ssh sshConfig, name string) error {
 	_ = c.Stop(ctx, name) // best-effort: ignore error, VM may already be stopped
 	if err := c.Delete(ctx, name); err != nil {
 		return fmt.Errorf("delete VM %q: %w", name, err)
 	}
+	ssh.remove(name)
 	return store.Delete(name)
 }
 
@@ -39,7 +40,7 @@ func newDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := runDelete(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), name); err != nil {
+			if err := runDelete(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), newSSHConfig(cmd), name); err != nil {
 				return err
 			}
 			fmt.Printf("Deleted: %s\n", name)

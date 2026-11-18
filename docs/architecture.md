@@ -320,6 +320,10 @@ The lifecycle commands and `avm delete <name>` can target an unmanaged VM. `dele
 
 `avm recreate <name>` requires a Record. It reports the configuration source described in §3 and rebuilds the guest from scratch. This discards guest-only files, tool state, and Docker volumes. The rebuilt VM uses the host mounts from the resolved configuration. The original Record remains if the rebuild fails.
 
+After provisioning and the final restart, `create` and `recreate` query Lima for the instance's `SSHConfigFile`. The CLI adds a marked `Include` at the top of the host's `~/.ssh/config` so OpenSSH can resolve `lima-<name>` before applying general `Host` rules. The path comes from Lima and honors `LIMA_HOME`. File updates are atomic, and `~/.ssh/.avm.lock` serializes edits by `avm` processes. The CLI preserves the user's SSH config lines, Unix file mode, and any symlink to the config. The replacement file receives the ownership and ACLs of a file created in the same directory.
+
+`delete` removes the marked line after Lima confirms deletion. `prune` also removes it for an orphaned Record, and a failed `recreate` removes it if the rollback deleted the instance. SSH config errors produce warnings. The VM and Record follow the same lifecycle regardless of the SSH config update result.
+
 ## 8. Mounts
 
 Every entry in `mounts` is equal: there is no main project and no privileged

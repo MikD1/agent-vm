@@ -19,6 +19,7 @@ import (
 type createDeps struct {
 	lima  *lima.Client
 	store *registry.Store
+	ssh   sshConfig
 }
 
 // runCreate performs Record-first creation: refuse on existing Record, write the
@@ -70,6 +71,7 @@ func runCreate(ctx context.Context, deps createDeps, r config.Resolved, guestHom
 	if err := deps.store.Write(rec); err != nil {
 		fmt.Printf("Warning: could not record installed tool versions: %v\n", err)
 	}
+	deps.ssh.add(ctx, deps.lima, r.Name)
 	fmt.Printf("VM ready: %s\nConnect: avm shell %s\n", r.Name, r.Name)
 	return nil
 }
@@ -159,6 +161,7 @@ func newCreateCmd() *cobra.Command {
 			deps := createDeps{
 				lima:  limaClient,
 				store: registry.NewStore(root),
+				ssh:   newSSHConfig(cmd),
 			}
 			return runCreate(ctx, deps, resolved, home, time.Now(), verbose)
 		},

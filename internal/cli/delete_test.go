@@ -26,7 +26,7 @@ func TestRunDeleteRemovesVMAndRecord(t *testing.T) {
 	store := registry.NewStore(t.TempDir())
 	_ = store.Write(registry.Record{Name: "my-api"})
 	r := &okRunner{}
-	if err := runDelete(context.Background(), lima.New(r), store, "my-api"); err != nil {
+	if err := runDelete(context.Background(), lima.New(r), store, testSSHConfig(t), "my-api"); err != nil {
 		t.Fatal(err)
 	}
 	ok, _ := store.Exists("my-api")
@@ -69,7 +69,11 @@ func TestRunPruneRemovesOrphansOnly(t *testing.T) {
 	store := registry.NewStore(t.TempDir())
 	_ = store.Write(registry.Record{Name: "managed"})
 	_ = store.Write(registry.Record{Name: "orphan"})
-	pruned, err := runPrune(context.Background(), stubNames([]string{"managed"}), store, "")
+	ssh := testSSHConfig(t)
+	managed := "Include \"/lima/managed/ssh.config\" # avm: managed\n"
+	orphan := "Include \"/lima/orphan/ssh.config\" # avm: orphan\n"
+	writeSSHConfig(t, ssh.path, managed+orphan)
+	pruned, err := runPrune(context.Background(), stubNames([]string{"managed"}), store, ssh, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,5 +82,8 @@ func TestRunPruneRemovesOrphansOnly(t *testing.T) {
 	}
 	if ok, _ := store.Exists("managed"); !ok {
 		t.Error("managed record must survive prune")
+	}
+	if got := readSSHConfig(t, ssh.path); got != managed {
+		t.Errorf("SSH config after prune = %q, want %q", got, managed)
 	}
 }

@@ -3,6 +3,8 @@ package lima
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -57,6 +59,23 @@ func TestInstances(t *testing.T) {
 	}
 	if instances[1].Name != "beta" || instances[1].State != "stopped" {
 		t.Errorf("second instance = %+v", instances[1])
+	}
+}
+
+func TestSSHConfigPathResolvesRelativeLimaHome(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{stdout: map[string][]byte{
+		"list --format {{.SSHConfigFile}} work": []byte("Lima VMs/work/ssh.config\n"),
+	}}
+	got, err := New(f).SSHConfigPath(t.Context(), "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(cwd, "Lima VMs", "work", "ssh.config"); got != want {
+		t.Errorf("SSH config path = %q, want %q", got, want)
 	}
 }
 

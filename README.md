@@ -57,6 +57,13 @@ avm shell work           # open a shell in the VM (lands in the guest home)
 Choose a VM name unused in Lima. If Lima returns a creation error, `avm create`
 attempts to delete the instance with that name as part of cleanup.
 
+After `avm create` or `avm recreate`, use `ssh lima-work` or select `lima-work`
+in a tool that reads OpenSSH configuration. `avm` adds an `Include` for the
+VM's Lima-generated SSH config to `~/.ssh/config`. `avm delete` removes that
+entry, and `avm prune` cleans up entries for orphaned Records. Existing VMs get
+an entry on their next `avm recreate`. If setting up the entry fails, `avm`
+prints a warning and the VM is still available through `avm shell`.
+
 Each project in `mounts` is mounted read/write at `~/<name>` in the guest; you
 edit on the host and the VM sees the changes. Commit/diff/branch inside the VM;
 push/pull on the host where credentials live.

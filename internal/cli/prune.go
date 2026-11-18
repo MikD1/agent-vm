@@ -9,9 +9,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// runPrune removes orphaned records (Record without VM). If name != "", only that
-// record is pruned (and only if orphaned). Returns the pruned names.
-func runPrune(ctx context.Context, c *lima.Client, store *registry.Store, name string) ([]string, error) {
+// runPrune removes orphaned records and their SSH includes. If name is set, it
+// limits cleanup to that record. Returns the pruned names.
+func runPrune(ctx context.Context, c *lima.Client, store *registry.Store, ssh sshConfig, name string) ([]string, error) {
 	records, err := store.List()
 	if err != nil {
 		return nil, err
@@ -28,6 +28,7 @@ func runPrune(ctx context.Context, c *lima.Client, store *registry.Store, name s
 		if name != "" && e.Name != name {
 			continue
 		}
+		ssh.remove(e.Name)
 		if err := store.Delete(e.Name); err != nil {
 			return pruned, err
 		}
@@ -50,7 +51,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			pruned, err := runPrune(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), name)
+			pruned, err := runPrune(cmd.Context(), newLimaClient(cmd), registry.NewStore(root), newSSHConfig(cmd), name)
 			for _, n := range pruned {
 				fmt.Printf("Pruned: %s\n", n)
 			}

@@ -128,6 +128,8 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 		rollbackMsg := "VM rolled back"
 		if delErr := deps.lima.Delete(ctx, name); delErr != nil {
 			rollbackMsg = fmt.Sprintf("VM rollback attempted but may have failed (%v); verify with `limactl list`", delErr)
+		} else {
+			deps.ssh.remove(name)
 		}
 		return fmt.Errorf("%w\n%s; record kept. Run `avm recreate %s` to retry", provErr, rollbackMsg, name)
 	}
@@ -138,6 +140,7 @@ func runRecreate(ctx context.Context, deps createDeps, name string, verbose bool
 	if err := deps.store.Write(next); err != nil {
 		fmt.Printf("Warning: could not update the record: %v\n", err)
 	}
+	deps.ssh.add(ctx, deps.lima, name)
 	fmt.Printf("VM recreated: %s\n", name)
 	return nil
 }
@@ -155,7 +158,7 @@ func newRecreateCmd() *cobra.Command {
 				return err
 			}
 			store := registry.NewStore(root)
-			deps := createDeps{lima: limaClient, store: store}
+			deps := createDeps{lima: limaClient, store: store, ssh: newSSHConfig(cmd)}
 			verbose, _ := cmd.Flags().GetBool("verbose")
 			return runRecreate(ctx, deps, args[0], verbose)
 		},
